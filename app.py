@@ -107,9 +107,14 @@ if ticker_input and selected_expiry:
         opt_chain = ticker.option_chain(selected_expiry)
         calls, puts = opt_chain.calls, opt_chain.puts
         
-        # 가독성을 위해 현재가 근처 ±30% 행사가만 필터링하여 차트 출력
-        mask = (calls['strike'] >= current_price * 0.7) & (calls['strike'] <= current_price * 1.3)
-        calls_f, puts_f = calls[mask], puts[mask]
+        # 가독성을 위해 현재가 근처 ±30% 행사가만 필터링하여 차트 출력 (버그 수정됨)
+        if current_price > 0:
+            min_strike = current_price * 0.7
+            max_strike = current_price * 1.3
+            calls_f = calls[(calls['strike'] >= min_strike) & (calls['strike'] <= max_strike)]
+            puts_f = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
+        else:
+            calls_f, puts_f = calls, puts
 
         # 주요 지표 계산
         call_vol = calls['volume'].sum()
