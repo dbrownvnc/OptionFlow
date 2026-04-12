@@ -14,7 +14,6 @@ st.markdown("""
     <style>
     .big-font { font-size:40px !important; font-weight: bold; color: #00e5a0; text-shadow: 0 0 20px rgba(0,229,160,0.2); }
     .subtitle { font-size:16px; color: #a0a0a0; margin-bottom: 25px; font-family: 'monospace'; }
-    .stMetric { background-color: #111827; padding: 15px; border-radius: 10px; border: 1px solid #1f2937; }
     .report-box { background-color: #1e293b; padding: 25px; border-radius: 12px; border-left: 5px solid #00e5a0; color: #f3f4f6; line-height: 1.6; }
     </style>
 """, unsafe_allow_html=True)
@@ -145,15 +144,37 @@ if ticker_input and selected_expiry:
         put_vol = puts['volume'].sum()
         pcr = put_vol / call_vol if call_vol > 0 else 0
 
-        # 지표 표시
+        # 💡 지표 표시 (가독성 향상 커스텀 HTML 적용)
         c1, c2, c3 = st.columns(3)
-        c1.metric("CALL 거래량", f"{int(call_vol):,}")
-        c2.metric("PUT 거래량", f"{int(put_vol):,}")
         
-        status = "중립"
-        if pcr > 1.2: status = "하락 신호 (Bearish)"
-        elif pcr < 0.7: status = "상승 신호 (Bullish)"
-        c3.metric("Put/Call Ratio", f"{pcr:.2f}", status)
+        status_color = "#f5a623"  # 중립 (밝은 주황/노란색으로 가독성 확보)
+        status_text = "중립 (Neutral)"
+        if pcr > 1.2: 
+            status_color = "#ff4d6d"  # 하락 (빨강)
+            status_text = "하락 신호 (Bearish)"
+        elif pcr < 0.7: 
+            status_color = "#00e5a0"  # 상승 (초록)
+            status_text = "상승 신호 (Bullish)"
+
+        def get_metric_card(title, value, val_color, status="", stat_color="transparent"):
+            return f"""
+            <div style="background-color: #111827; padding: 20px; border-radius: 12px; border: 1px solid #1f2937; box-shadow: 0 4px 6px rgba(0,0,0,0.2); height: 100%;">
+                <div style="color: #9ca3af; font-size: 15px; margin-bottom: 8px; font-weight: 600;">{title}</div>
+                <div style="display: flex; align-items: baseline; gap: 12px;">
+                    <div style="color: {val_color}; font-size: 34px; font-weight: 800;">{value}</div>
+                    <div style="color: {stat_color}; font-size: 16px; font-weight: 700;">{status}</div>
+                </div>
+            </div>
+            """
+
+        with c1:
+            st.markdown(get_metric_card("CALL 거래량", f"{int(call_vol):,}", "#00e5a0"), unsafe_allow_html=True)
+        with c2:
+            st.markdown(get_metric_card("PUT 거래량", f"{int(put_vol):,}", "#ff4d6d"), unsafe_allow_html=True)
+        with c3:
+            st.markdown(get_metric_card("Put/Call Ratio", f"{pcr:.2f}", "#f3f4f6", status_text, status_color), unsafe_allow_html=True)
+            
+        st.markdown("<br>", unsafe_allow_html=True) # 카드 아래 여백 추가
 
         # Plotly 차트
         fig = go.Figure()
@@ -177,7 +198,7 @@ if ticker_input and selected_expiry:
         with tab2:
             st.dataframe(format_option_df(puts), use_container_width=True, hide_index=True)
 
-    # --- 6. 💡 AI 분석 프롬프트 고도화 로직 ---
+    # --- 6. AI 분석 프롬프트 고도화 로직 ---
     st.divider()
     st.subheader("🤖 Gemini AI 옵션 시장 브리핑")
     
@@ -187,7 +208,6 @@ if ticker_input and selected_expiry:
         put_oi = puts['openInterest'].sum()
         pcr_oi = put_oi / call_oi if call_oi > 0 else 0
 
-        # 에러 방지를 위한 안전한 최대값 추출
         def get_max_row(df, col):
             if df.empty or df[col].isnull().all(): return None
             return df.loc[df[col].idxmax()]
@@ -205,12 +225,10 @@ if ticker_input and selected_expiry:
             return f"${row[col]:,.2f}" if is_price else f"{row[col]:,.0f}"
             
     except Exception as e:
-        st.warning(f"프롬프트용 추가 데이터 계산 중 일부 오류가 발생했습니다: {e}")
         call_oi, put_oi, pcr_oi, avg_iv_call, avg_iv_put = 0, 0, 0, 0, 0
         max_vol_call, max_vol_put, max_oi_call, max_oi_put = None, None, None, None
         def fmt_val(row, col, is_price=False): return "N/A"
 
-    # 매우 정교해진 AI 전용 프롬프트 생성
     prompt = f"""
 당신은 월스트리트의 시니어 파생상품 애널리스트입니다. 아래 제공된 '{name} ({ticker_input})'의 상세 옵션 체인 데이터를 심층적으로 분석하여 기관 투자자 수준의 시장 심리 및 방향성 브리핑을 작성하세요.
 
