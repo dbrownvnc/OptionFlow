@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 import google.generativeai as genai
+import time
 
 # --- 1. 페이지 설정 ---
 st.set_page_config(page_title="OPTIONS FLOW", layout="wide", page_icon="📈")
@@ -17,15 +18,45 @@ st.markdown("""
 st.markdown('<p class="big-font">OPTIONS FLOW</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">실시간 옵션 거래량 분석기 (Python + Gemini AI)</p>', unsafe_allow_html=True)
 
-# --- 2. Gemini API 설정 (st.secrets 활용) ---
+# --- 2. Gemini API 설정 (첨부된 app_ai.py의 견고한 로직 적용) ---
+api_key = None
 has_api_key = False
-try:
-    # Streamlit Cloud의 Secrets 또는 로컬 .streamlit/secrets.toml에서 키를 가져옴
-    gemini_api_key = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=gemini_api_key)
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
     has_api_key = True
-except KeyError:
-    st.warning("⚠️ Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다. AI 분석 기능이 비활성화됩니다.")
+else:
+    st.sidebar.error("⚠️ Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다.")
+
+def generate_with_fallback(prompt, api_key):
+    """app_ai.py에 구현된 다중 모델 Fallback 로직을 적용하여 API 에러를 완벽 방어합니다."""
+    genai.configure(api_key=api_key)
+    
+    # 1.5 Pro를 우선 시도하고, 에러 시 Flash 등 다른 모델로 자동 우회
+    start_model = "gemini-1.5-pro"
+    fallback_chain = [start_model]
+    backups = [
+        "gemini-2.0-flash", 
+        "gemini-1.5-flash", 
+        "gemini-1.5-flash-8b", 
+        "gemini-1.0-pro"
+    ]
+    
+    for b in backups:
+        if b != start_model: 
+            fallback_chain.append(b)
+    
+    last_error = None
+    for model_name in fallback_chain:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text, model_name 
+        except Exception as e:
+            last_error = e
+            time.sleep(0.5)
+            continue
+            
+    raise Exception(f"모든 AI 모델 시도 실패. 에러 내용: {last_error}")
 
 # --- 3. 사이드바 (종목 및 만기일 선택) ---
 with st.sidebar:
@@ -123,9 +154,8 @@ if has_api_key and ticker_symbol and 'selected_expiry' in locals() and selected_
     st.divider()
     st.subheader("🤖 Gemini AI 옵션 시장 분석")
     
-    if st.button("AI 브리핑 생성하기"):
+    if st.button("AI 브리핑 생성하기", type="primary"):
         with st.spinner("Gemini가 데이터를 분석 중입니다..."):
-            model = genai.GenerativeModel('gemini-2.5-pro')
             prompt = f"""
             당신은 월스트리트의 전문 파생상품 애널리스트입니다. 아래 데이터를 바탕으로 시장 심리를 분석해주세요.
             
@@ -144,8 +174,14 @@ if has_api_key and ticker_symbol and 'selected_expiry' in locals() and selected_
             """
             
             try:
-                response = model.generate_content(prompt)
-                st.success("분석 완료!")
-                st.write(response.text)
+                # app_ai.py의 안정적인 함수 호출
+                report, used_model = generate_with_fallback(prompt, api_key)
+                
+                st.success(f"분석 완료! (사용한 모델: {used_model})")
+                st.markdown(f"""
+                <div style="background: #1e293b; padding: 20px; border-radius: 8px; border-left: 5px solid #00e5a0;">
+                    {report}
+                </div>
+                """, unsafe_allow_html=True)
             except Exception as e:
                 st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
