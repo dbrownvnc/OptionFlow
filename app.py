@@ -20,48 +20,36 @@ st.markdown("""
 st.markdown('<p class="big-font">OPTIONS FLOW</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">실시간 옵션 분석 시스템 (Gemini Smart Fallback)</p>', unsafe_allow_html=True)
 
-# --- 2. Gemini API 스마트 로직 (동적 모델 확인 및 우회) ---
+# --- 2. Gemini API 설정 (app_ai.py의 성공 로직 완벽 이식) ---
 def generate_with_fallback(prompt, api_key):
     """
-    API 키가 접근 가능한 모델을 실시간으로 조회하고, 
-    우선순위에 따라 에러 없이 답변을 생성합니다.
+    app_ai.py에서 정상 작동이 확인된 모델명(Preview 및 Latest)을 그대로 적용합니다.
     """
     genai.configure(api_key=api_key)
     
-    # [STEP 1] 현재 API 키로 사용 가능한 모델 목록 조회
-    try:
-        available_models = [
-            m.name.replace('models/', '') 
-            for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
-    except Exception as e:
-        raise Exception(f"API 키 인증에 실패했습니다: {e}")
+    # 429 에러를 피하기 위해 한도가 넉넉한 모델부터 순차적으로 시도
+    fallback_chain = [
+        "gemini-2.0-flash-lite-preview-02-05",  # app_ai.py 성공의 핵심 (프리뷰 모델)
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-flash-latest"                   # 최후의 보루 (가장 최신 가용 모델로 자동 라우팅)
+    ]
 
-    # [STEP 2] 선호 모델 순서 정의
-    preferred_order = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"]
-    
-    # 실제 사용 가능한 모델만 필터링
-    fallback_chain = [m for m in preferred_order if m in available_models]
-    
-    # 목록에 없는 모델이 있다면 첫 번째 가용 모델 사용
-    if not fallback_chain and available_models:
-        fallback_chain.append(available_models[0])
-
-    # [STEP 3] 순차적 호출 시도
     last_errors = []
+    
     for model_name in fallback_chain:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             return response.text, model_name
         except Exception as e:
-            error_msg = f"{model_name}: {str(e)[:100]}..."
+            error_msg = f"[{model_name} 실패: {str(e)[:100]}...]"
             last_errors.append(error_msg)
-            time.sleep(1) # 서버 과부하 방지용 짧은 휴식
+            time.sleep(0.5) # 서버 부하 방지용 짧은 대기
             continue
             
-    raise Exception(f"모든 모델 호출에 실패했습니다.\n사유: {' | '.join(last_errors)}")
+    raise Exception(f"모든 모델 호출에 실패했습니다.\n사유: {' / '.join(last_errors)}")
 
 # Secrets에서 API 키 로드
 api_key = st.secrets.get("GEMINI_API_KEY")
@@ -107,7 +95,7 @@ if ticker_input and selected_expiry:
         opt_chain = ticker.option_chain(selected_expiry)
         calls, puts = opt_chain.calls, opt_chain.puts
         
-        # 가독성을 위해 현재가 근처 ±30% 행사가만 필터링하여 차트 출력 (버그 수정됨)
+        # 가독성을 위해 현재가 근처 ±30% 행사가만 필터링 (인덱싱 버그 수정 완료)
         if current_price > 0:
             min_strike = current_price * 0.7
             max_strike = current_price * 1.3
@@ -159,7 +147,7 @@ if ticker_input and selected_expiry:
         st.subheader("🤖 Gemini AI 옵션 시장 브리핑")
         
         if st.button("AI 정밀 분석 시작", type="primary"):
-            with st.spinner("AI가 최적의 모델을 찾아 데이터를 분석하고 있습니다..."):
+            with st.spinner("AI가 데이터를 분석하고 있습니다... (약 10초 소요)"):
                 prompt = f"""
                 당신은 월스트리트 파생상품 전문가입니다. 아래 데이터를 바탕으로 시장 심리를 분석하세요.
                 
