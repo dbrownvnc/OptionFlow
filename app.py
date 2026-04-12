@@ -13,185 +13,166 @@ st.markdown("""
     .big-font { font-size:40px !important; font-weight: bold; color: #00e5a0; text-shadow: 0 0 20px rgba(0,229,160,0.2); }
     .subtitle { font-size:16px; color: #a0a0a0; margin-bottom: 25px; font-family: 'monospace'; }
     .stMetric { background-color: #111827; padding: 15px; border-radius: 10px; border: 1px solid #1f2937; }
+    .report-box { background-color: #1e293b; padding: 25px; border-radius: 12px; border-left: 5px solid #00e5a0; color: #f3f4f6; line-height: 1.6; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="big-font">OPTIONS FLOW</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">실시간 옵션 데이터 분석 시스템 (Python + Gemini AI)</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">실시간 옵션 분석 시스템 (Gemini Smart Fallback)</p>', unsafe_allow_html=True)
 
-# --- 2. Gemini API 설정 (안정적인 Fallback 로직) ---
+# --- 2. Gemini API 스마트 로직 (동적 모델 확인 및 우회) ---
 def generate_with_fallback(prompt, api_key):
     """
-    지원 중단된 모델(1.0-pro 등)을 제외하고 최신 모델들로 순차적 호출을 시도합니다.
+    API 키가 접근 가능한 모델을 실시간으로 조회하고, 
+    우선순위에 따라 에러 없이 답변을 생성합니다.
     """
     genai.configure(api_key=api_key)
     
-    # 현재 작동이 확인된 최신 모델 리스트 (우선순위 순)
-    fallback_chain = [
-        "gemini-1.5-pro",          # 가장 지능이 높음
-        "gemini-2.0-flash",        # 가장 빠름 (현재 Preview/Exp 버전 확인 필요)
-        "gemini-1.5-flash",        # 안정적인 범용 모델
-        "gemini-1.5-flash-8b"      # 경량화 모델
-    ]
+    # [STEP 1] 현재 API 키로 사용 가능한 모델 목록 조회
+    try:
+        available_models = [
+            m.name.replace('models/', '') 
+            for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+    except Exception as e:
+        raise Exception(f"API 키 인증에 실패했습니다: {e}")
+
+    # [STEP 2] 선호 모델 순서 정의
+    preferred_order = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"]
     
-    last_error_log = []
+    # 실제 사용 가능한 모델만 필터링
+    fallback_chain = [m for m in preferred_order if m in available_models]
     
+    # 목록에 없는 모델이 있다면 첫 번째 가용 모델 사용
+    if not fallback_chain and available_models:
+        fallback_chain.append(available_models[0])
+
+    # [STEP 3] 순차적 호출 시도
+    last_errors = []
     for model_name in fallback_chain:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
-            return response.text, model_name 
+            return response.text, model_name
         except Exception as e:
-            error_msg = f"{model_name}: {str(e)}"
-            last_error_log.append(error_msg)
-            time.sleep(0.5)
+            error_msg = f"{model_name}: {str(e)[:100]}..."
+            last_errors.append(error_msg)
+            time.sleep(1) # 서버 과부하 방지용 짧은 휴식
             continue
             
-    raise Exception(f"모든 AI 모델 호출 실패: {' | '.join(last_error_log)}")
+    raise Exception(f"모든 모델 호출에 실패했습니다.\n사유: {' | '.join(last_errors)}")
 
-# Secrets에서 API 키 가져오기
+# Secrets에서 API 키 로드
 api_key = st.secrets.get("GEMINI_API_KEY")
 has_api_key = api_key is not None
 
 if not has_api_key:
     st.sidebar.error("⚠️ Streamlit Secrets에 'GEMINI_API_KEY'가 설정되지 않았습니다.")
 
-# --- 3. 사이드바 검색 설정 ---
+# --- 3. 사이드바 검색 영역 ---
 with st.sidebar:
     st.header("🔍 검색 설정")
-    ticker_symbol = st.text_input("티커 심볼 입력 (예: AAPL, TSLA, NVDA)", value="AAPL").upper()
+    ticker_input = st.text_input("티커 심볼 (예: AAPL, NVDA, SPY)", value="AAPL").upper()
     
-    ticker = yf.Ticker(ticker_symbol)
+    ticker = yf.Ticker(ticker_input)
     try:
         expirations = ticker.options
         if expirations:
             selected_expiry = st.selectbox("만기일 선택", expirations)
         else:
-            st.error(f"'{ticker_symbol}'의 옵션 데이터를 찾을 수 없습니다.")
+            st.error("옵션 데이터를 찾을 수 없는 티커입니다.")
             selected_expiry = None
-    except Exception as e:
-        st.error(f"데이터 로드 에러: {e}")
+    except:
+        st.error("데이터 서버 연결에 문제가 발생했습니다.")
         selected_expiry = None
 
-# --- 4. 데이터 수집 및 대시보드 출력 ---
-if ticker_symbol and selected_expiry:
-    # 실시간 가격 및 정보
+# --- 4. 데이터 수집 및 대시보드 시각화 ---
+if ticker_input and selected_expiry:
     try:
-        # 현재가 가져오기 (Fast Info 우선)
-        ticker_info = ticker.info
-        spot_price = ticker_info.get('currentPrice') or ticker_info.get('regularMarketPrice')
-        
-        # 가격 정보가 없는 경우 history로 보완
-        if not spot_price:
-            spot_price = ticker.history(period="1d")['Close'].iloc[-1]
-            
-        company_name = ticker_info.get('longName', ticker_symbol)
+        # 현재가 정보 수집
+        info = ticker.info
+        current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+        if not current_price:
+            current_price = ticker.history(period="1d")['Close'].iloc[-1]
+        name = info.get('longName', ticker_input)
     except:
-        spot_price = 0
-        company_name = ticker_symbol
+        current_price = 0
+        name = ticker_input
 
-    st.subheader(f"📊 {company_name} ({ticker_symbol}) | 현재가: ${spot_price:,.2f}")
-    st.info(f"선택된 만기일: {selected_expiry}")
-
-    with st.spinner("옵션 체인 데이터 수집 중..."):
-        # 옵션 데이터 추출
-        opt = ticker.option_chain(selected_expiry)
-        calls = opt.calls
-        puts = opt.puts
+    st.subheader(f"📊 {name} ({ticker_input}) | 현재가: ${current_price:,.2f}")
+    
+    with st.spinner("옵션 체인 분석 중..."):
+        # 옵션 데이터 프레임 로드
+        opt_chain = ticker.option_chain(selected_expiry)
+        calls, puts = opt_chain.calls, opt_chain.puts
         
-        # 현재가 기준 ±30% 범위 필터링 (가독성 향상)
-        if spot_price > 0:
-            min_strike, max_strike = spot_price * 0.7, spot_price * 1.3
-            calls_filtered = calls[(calls['strike'] >= min_strike) & (calls['strike'] <= max_strike)]
-            puts_filtered = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
-        else:
-            calls_filtered, puts_filtered = calls, puts
+        # 가독성을 위해 현재가 근처 ±30% 행사가만 필터링하여 차트 출력
+        mask = (calls['strike'] >= current_price * 0.7) & (calls['strike'] <= current_price * 1.3)
+        calls_f, puts_f = calls[mask], puts[mask]
 
         # 주요 지표 계산
-        total_call_vol = calls['volume'].sum()
-        total_put_vol = puts['volume'].sum()
-        pcr = total_put_vol / total_call_vol if total_call_vol > 0 else 0
+        call_vol = calls['volume'].sum()
+        put_vol = puts['volume'].sum()
+        pcr = put_vol / call_vol if call_vol > 0 else 0
 
-        # 지표 가시화
-        m1, m2, m3 = st.columns(3)
-        m1.metric("CALL 총 거래량", f"{int(total_call_vol):,}")
-        m2.metric("PUT 총 거래량", f"{int(total_put_vol):,}")
+        # 지표 표시
+        c1, c2, c3 = st.columns(3)
+        c1.metric("CALL 거래량", f"{int(call_vol):,}")
+        c2.metric("PUT 거래량", f"{int(put_vol):,}")
         
-        sentiment = "중립"
-        if pcr > 1.2: sentiment = "하락 우세 (Bearish)"
-        elif pcr < 0.7: sentiment = "상승 우세 (Bullish)"
-        m3.metric("Put/Call Ratio", f"{pcr:.2f}", sentiment)
+        status = "중립"
+        if pcr > 1.2: status = "하락 신호 (Bearish)"
+        elif pcr < 0.7: status = "상승 신호 (Bullish)"
+        c3.metric("Put/Call Ratio", f"{pcr:.2f}", status)
 
-        # --- 차트 시각화 ---
+        # Plotly 차트
         fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=calls_filtered['strike'], y=calls_filtered['volume'],
-            name='CALL Volume', marker_color='#00e5a0', opacity=0.8
-        ))
-        fig.add_trace(go.Bar(
-            x=puts_filtered['strike'], y=-puts_filtered['volume'], # 풋은 반대 방향으로 표시
-            name='PUT Volume', marker_color='#ff4d6d', opacity=0.8
-        ))
-
+        fig.add_trace(go.Bar(x=calls_f['strike'], y=calls_f['volume'], name='Calls', marker_color='#00e5a0'))
+        fig.add_trace(go.Bar(x=puts_f['strike'], y=-puts_f['volume'], name='Puts', marker_color='#ff4d6d'))
+        
         fig.update_layout(
-            title=f"행사가(Strike)별 거래량 분포 (만기: {selected_expiry})",
-            barmode='relative',
-            template="plotly_dark",
-            height=450,
-            xaxis_title="Strike Price",
-            yaxis_title="Volume",
+            title=f"행사가별 거래량 (만기: {selected_expiry})",
+            barmode='relative', template="plotly_dark", height=400,
             hovermode="x unified"
         )
-        # 현재가 라인 추가
-        if spot_price > 0:
-            fig.add_vline(x=spot_price, line_dash="dash", line_color="white", annotation_text="Spot Price")
-
+        if current_price > 0:
+            fig.add_vline(x=current_price, line_dash="dash", line_color="white", annotation_text="현재가")
+        
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- 상세 데이터 테이블 ---
-        t1, t2 = st.tabs(["▲ CALL 옵션 리스트", "▼ PUT 옵션 리스트"])
-        with t1:
+        # 데이터 테이블
+        tab1, tab2 = st.tabs(["▲ CALL 옵션 상세", "▼ PUT 옵션 상세"])
+        with tab1:
             st.dataframe(calls[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility']], use_container_width=True, hide_index=True)
-        with t2:
+        with tab2:
             st.dataframe(puts[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility']], use_container_width=True, hide_index=True)
 
-    # --- 5. Gemini AI 분석 리포트 ---
+    # --- 5. AI 분석 섹션 ---
     if has_api_key:
         st.divider()
-        st.subheader("🤖 Gemini AI 옵션 시장 정밀 브리핑")
+        st.subheader("🤖 Gemini AI 옵션 시장 브리핑")
         
-        if st.button("분석 리포트 생성", type="primary"):
-            with st.spinner("Gemini가 방대한 옵션 체인 데이터를 분석 중입니다..."):
-                # AI에게 전달할 데이터 요약
-                analysis_prompt = f"""
-                당신은 파생상품 분석 전문가입니다. 아래 주식의 옵션 데이터를 바탕으로 향후 주가 방향을 분석해 주세요.
+        if st.button("AI 정밀 분석 시작", type="primary"):
+            with st.spinner("AI가 최적의 모델을 찾아 데이터를 분석하고 있습니다..."):
+                prompt = f"""
+                당신은 월스트리트 파생상품 전문가입니다. 아래 데이터를 바탕으로 시장 심리를 분석하세요.
                 
-                [종목 정보]
-                티커: {ticker_symbol} / 종목명: {company_name} / 현재가: ${spot_price}
-                분석 만기일: {selected_expiry}
+                [정보]
+                티커: {ticker_input} / 현재가: ${current_price} / 만기일: {selected_expiry}
+                콜옵션 총 거래량: {call_vol:,} / 풋옵션 총 거래량: {put_vol:,}
+                Put/Call Ratio: {pcr:.2f}
                 
-                [수급 데이터]
-                - 콜옵션 총 거래량: {total_call_vol}
-                - 풋옵션 총 거래량: {total_put_vol}
-                - Put/Call Ratio: {pcr:.2f}
-                
-                [기술적 특징]
-                - 거래량이 가장 많이 집중된 행사가(Strike): (데이터 기반으로 분석 요청)
-                
-                [요청사항]
-                1. 현재 시장 참여자들이 상승(Bull)과 하락(Bear) 중 어느 쪽에 더 강하게 배팅하고 있는지 결론을 내주세요.
-                2. Put/Call Ratio가 역사적 평균 대비 어떤 상태인지, 그리고 이것이 심리적으로 '공포'인지 '탐욕'인지 설명해 주세요.
-                3. 트레이더가 주목해야 할 핵심 저항선(Call 매물대)과 지지선(Put 매물대)을 가격대로 제시해 주세요.
-                4. 초보자도 이해할 수 있도록 친절하고 전문적인 한글 톤으로 요약해 주세요.
+                [지시사항]
+                1. 현재 시장 참여자들이 단기 주가 방향을 어떻게 보고 있는지 명확한 결론을 내려주세요.
+                2. PCR 수치가 역사적 평균(약 0.7~1.0) 대비 어떤 수준이며 심리적 상태가 어떠한지 설명하세요.
+                3. 가장 큰 거래량이 몰린 행사가를 지지선/저항선 관점에서 해석해 주세요.
+                4. 초보자도 이해할 수 있게 친절한 한글로 작성해 주세요.
                 """
                 
                 try:
-                    report, used_model = generate_with_fallback(analysis_prompt, api_key)
-                    st.success(f"분석 완료 (사용 모델: {used_model})")
-                    st.markdown(f"""
-                    <div style="background-color: #1e293b; padding: 25px; border-radius: 12px; border-left: 5px solid #00e5a0; color: #f3f4f6; line-height: 1.6;">
-                        {report}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    result, used_model = generate_with_fallback(prompt, api_key)
+                    st.success(f"분석 완료! (사용한 모델: {used_model})")
+                    st.markdown(f'<div class="report-box">{result}</div>', unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
+                    st.error(f"분석 중 오류 발생: {e}")
