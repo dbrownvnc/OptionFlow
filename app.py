@@ -71,7 +71,55 @@ with st.sidebar:
         st.error("데이터 서버 연결에 문제가 발생했습니다.")
         selected_expiry = None
 
-# --- 4. 데이터 수집 및 대시보드 시각화 ---
+# --- 4. 데이터 포맷팅 함수 (최대한 많은 지표 노출) ---
+def format_option_df(df):
+    if df is None or df.empty:
+        return df
+    
+    # yfinance에서 제공하는 유용한 컬럼들을 최대한 가져옴
+    useful_cols = [
+        'contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 
+        'change', 'percentChange', 'volume', 'openInterest', 
+        'impliedVolatility', 'inTheMoney', 'lastTradeDate'
+    ]
+    
+    # 데이터프레임에 존재하는 컬럼만 필터링
+    available_cols = [c for c in useful_cols if c in df.columns]
+    f_df = df[available_cols].copy()
+    
+    # 보기 좋게 포맷팅 적용
+    if 'impliedVolatility' in f_df.columns:
+        f_df['impliedVolatility'] = (f_df['impliedVolatility'] * 100).map("{:.2f}%".format)
+    if 'percentChange' in f_df.columns:
+        f_df['percentChange'] = f_df['percentChange'].map("{:+.2f}%".format)
+    if 'change' in f_df.columns:
+        f_df['change'] = f_df['change'].map("{:+.2f}".format)
+    if 'lastTradeDate' in f_df.columns:
+        # 시간대 변환 및 포맷 변경
+        f_df['lastTradeDate'] = pd.to_datetime(f_df['lastTradeDate']).dt.strftime('%Y-%m-%d %H:%M')
+    if 'inTheMoney' in f_df.columns:
+        f_df['inTheMoney'] = f_df['inTheMoney'].map({True: "✅ ITM", False: "❌ OTM"})
+
+    # 한글 헤더로 이름 변경
+    rename_dict = {
+        'contractSymbol': '계약 심볼',
+        'strike': '행사가',
+        'lastPrice': '현재가',
+        'bid': '매수호가(Bid)',
+        'ask': '매도호가(Ask)',
+        'change': '변동액',
+        'percentChange': '변동률',
+        'volume': '거래량',
+        'openInterest': '미결제약정(OI)',
+        'impliedVolatility': '내재변동성(IV)',
+        'inTheMoney': 'ITM 여부',
+        'lastTradeDate': '최근 거래일시'
+    }
+    
+    f_df = f_df.rename(columns=rename_dict)
+    return f_df
+
+# --- 5. 데이터 수집 및 대시보드 시각화 ---
 if ticker_input and selected_expiry:
     try:
         info = ticker.info
@@ -89,14 +137,14 @@ if ticker_input and selected_expiry:
         opt_chain = ticker.option_chain(selected_expiry)
         calls, puts = opt_chain.calls, opt_chain.puts
         
-        # 인덱싱 버그 방지 및 현재가 근처 ±30% 필터링
+        # 차트를 위해 현재가 근처 ±30% 필터링 (테이블에는 필터링 안 된 전체 표출)
         if current_price > 0:
             min_strike = current_price * 0.7
             max_strike = current_price * 1.3
-            calls_f = calls[(calls['strike'] >= min_strike) & (calls['strike'] <= max_strike)]
-            puts_f = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
+            calls_chart = calls[(calls['strike'] >= min_strike) & (calls['strike'] <= max_strike)]
+            puts_chart = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
         else:
-            calls_f, puts_f = calls, puts
+            calls_chart, puts_chart = calls, puts
 
         # 주요 지표 계산
         call_vol = calls['volume'].sum()
@@ -115,11 +163,11 @@ if ticker_input and selected_expiry:
 
         # Plotly 차트
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=calls_f['strike'], y=calls_f['volume'], name='Calls', marker_color='#00e5a0'))
-        fig.add_trace(go.Bar(x=puts_f['strike'], y=-puts_f['volume'], name='Puts', marker_color='#ff4d6d'))
+        fig.add_trace(go.Bar(x=calls_chart['strike'], y=calls_chart['volume'], name='Calls', marker_color='#00e5a0'))
+        fig.add_trace(go.Bar(x=puts_chart['strike'], y=-puts_chart['volume'], name='Puts', marker_color='#ff4d6d'))
         
         fig.update_layout(
-            title=f"행사가별 거래량 (만기: {selected_expiry})",
+            title=f"행사가별 거래량 분포 (만기: {selected_expiry}) - 현재가 ±30% 구간",
             barmode='relative', template="plotly_dark", height=400,
             hovermode="x unified"
         )
@@ -128,7 +176,15 @@ if ticker_input and selected_expiry:
         
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- 5. AI 분석 섹션 (자동 & 수동 복사 버튼 통합) ---
+        # 💡 상위 데이터 테이블 - 가능한 한 많은 데이터를 포맷팅하여 보여줌
+        st.markdown("#### 📑 전체 옵션 체인 상세 데이터")
+        tab1, tab2 = st.tabs(["▲ CALL 옵션 상세", "▼ PUT 옵션 상세"])
+        with tab1:
+            st.dataframe(format_option_df(calls), use_container_width=True, hide_index=True)
+        with tab2:
+            st.dataframe(format_option_df(puts), use_container_width=True, hide_index=True)
+
+    # --- 6. AI 분석 섹션 ---
     st.divider()
     st.subheader("🤖 Gemini AI 옵션 시장 브리핑")
     
@@ -178,7 +234,6 @@ if ticker_input and selected_expiry:
             navigator.clipboard.writeText(text).then(function() {{
                 window.open("https://gemini.google.com/", "_blank");
             }}).catch(function() {{
-                // 클립보드 권한이 막혀있을 때를 대비한 백업 로직
                 const ta = document.createElement("textarea");
                 ta.value = text;
                 document.body.appendChild(ta);
