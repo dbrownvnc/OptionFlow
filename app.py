@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import google.generativeai as genai
 import time
 import json
+from datetime import datetime
 
 # --- 1. 페이지 설정 및 디자인 ---
 st.set_page_config(page_title="OPTIONS FLOW", layout="wide", page_icon="📈")
@@ -14,17 +15,17 @@ st.markdown("""
     <style>
     .big-font { font-size:40px !important; font-weight: bold; color: #00e5a0; text-shadow: 0 0 20px rgba(0,229,160,0.2); }
     .subtitle { font-size:16px; color: #a0a0a0; margin-bottom: 25px; font-family: 'monospace'; }
+    .stMetric { background-color: #111827; padding: 15px; border-radius: 10px; border: 1px solid #1f2937; }
     .report-box { background-color: #1e293b; padding: 25px; border-radius: 12px; border-left: 5px solid #00e5a0; color: #f3f4f6; line-height: 1.6; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="big-font">OPTIONS FLOW</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">실시간 옵션 분석 시스템 (Gemini Smart Fallback)</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">실시간 옵션 분석 시스템 (단/중/장기 통합 지원)</p>', unsafe_allow_html=True)
 
-# --- 2. Gemini API 설정 (안정성 강화) ---
+# --- 2. Gemini API 설정 ---
 def generate_with_fallback(prompt, api_key):
     genai.configure(api_key=api_key)
-    
     fallback_chain = [
         "gemini-2.0-flash-lite-preview-02-05",
         "gemini-1.5-pro",
@@ -32,7 +33,6 @@ def generate_with_fallback(prompt, api_key):
         "gemini-1.5-flash-8b",
         "gemini-flash-latest"
     ]
-
     last_errors = []
     for model_name in fallback_chain:
         try:
@@ -43,7 +43,6 @@ def generate_with_fallback(prompt, api_key):
             last_errors.append(f"[{model_name} 실패: {str(e)[:100]}]")
             time.sleep(0.5)
             continue
-            
     raise Exception(f"모든 모델 호출에 실패했습니다.\n사유: {' / '.join(last_errors)}")
 
 api_key = st.secrets.get("GEMINI_API_KEY")
@@ -57,63 +56,25 @@ with st.sidebar:
     st.header("🔍 검색 설정")
     ticker_input = st.text_input("티커 심볼 (예: AAPL, NVDA, SPY)", value="AAPL").upper()
     
+    analysis_mode = st.radio("분석 모드 선택", ["단일 만기일 분석", "전체 기간 통합 분석 (단/중/장기)"])
+    
     ticker = yf.Ticker(ticker_input)
+    expirations = []
     try:
         expirations = ticker.options
-        if expirations:
-            selected_expiry = st.selectbox("만기일 선택", expirations)
-        else:
+        if not expirations:
             st.error("옵션 데이터를 찾을 수 없는 티커입니다.")
-            selected_expiry = None
     except:
         st.error("데이터 서버 연결에 문제가 발생했습니다.")
-        selected_expiry = None
+        
+    selected_expiry = None
+    if expirations and analysis_mode == "단일 만기일 분석":
+        selected_expiry = st.selectbox("만기일 선택", expirations)
 
-# --- 4. 데이터 포맷팅 함수 ---
-def format_option_df(df):
-    if df is None or df.empty:
-        return df
-    
-    useful_cols = [
-        'contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 
-        'change', 'percentChange', 'volume', 'openInterest', 
-        'impliedVolatility', 'inTheMoney', 'lastTradeDate'
-    ]
-    
-    available_cols = [c for c in useful_cols if c in df.columns]
-    f_df = df[available_cols].copy()
-    
-    if 'impliedVolatility' in f_df.columns:
-        f_df['impliedVolatility'] = (f_df['impliedVolatility'] * 100).map("{:.2f}%".format)
-    if 'percentChange' in f_df.columns:
-        f_df['percentChange'] = f_df['percentChange'].map("{:+.2f}%".format)
-    if 'change' in f_df.columns:
-        f_df['change'] = f_df['change'].map("{:+.2f}".format)
-    if 'lastTradeDate' in f_df.columns:
-        f_df['lastTradeDate'] = pd.to_datetime(f_df['lastTradeDate']).dt.strftime('%Y-%m-%d %H:%M')
-    if 'inTheMoney' in f_df.columns:
-        f_df['inTheMoney'] = f_df['inTheMoney'].map({True: "✅ ITM", False: "❌ OTM"})
-
-    rename_dict = {
-        'contractSymbol': '계약 심볼',
-        'strike': '행사가',
-        'lastPrice': '현재가',
-        'bid': '매수호가(Bid)',
-        'ask': '매도호가(Ask)',
-        'change': '변동액',
-        'percentChange': '변동률',
-        'volume': '거래량',
-        'openInterest': '미결제약정(OI)',
-        'impliedVolatility': '내재변동성(IV)',
-        'inTheMoney': 'ITM 여부',
-        'lastTradeDate': '최근 거래일시'
-    }
-    
-    f_df = f_df.rename(columns=rename_dict)
-    return f_df
-
-# --- 5. 데이터 수집 및 대시보드 시각화 ---
-if ticker_input and selected_expiry:
+# --- 4. 공통 데이터 수집 (현재가 등) ---
+current_price = 0
+name = ticker_input
+if ticker_input and expirations:
     try:
         info = ticker.info
         current_price = info.get('currentPrice') or info.get('regularMarketPrice')
@@ -121,40 +82,38 @@ if ticker_input and selected_expiry:
             current_price = ticker.history(period="1d")['Close'].iloc[-1]
         name = info.get('longName', ticker_input)
     except:
-        current_price = 0
-        name = ticker_input
+        pass
 
     st.subheader(f"📊 {name} ({ticker_input}) | 현재가: ${current_price:,.2f}")
-    
-    with st.spinner("옵션 체인 분석 중..."):
+
+# =====================================================================
+# 모드 1: 단일 만기일 분석 (기존 로직 유지)
+# =====================================================================
+if analysis_mode == "단일 만기일 분석" and selected_expiry:
+    with st.spinner(f"'{selected_expiry}' 만기 옵션 체인 분석 중..."):
         opt_chain = ticker.option_chain(selected_expiry)
         calls, puts = opt_chain.calls, opt_chain.puts
         
-        # 차트를 위해 현재가 근처 ±30% 필터링
         if current_price > 0:
-            min_strike = current_price * 0.7
-            max_strike = current_price * 1.3
+            min_strike, max_strike = current_price * 0.7, current_price * 1.3
             calls_chart = calls[(calls['strike'] >= min_strike) & (calls['strike'] <= max_strike)]
             puts_chart = puts[(puts['strike'] >= min_strike) & (puts['strike'] <= max_strike)]
         else:
             calls_chart, puts_chart = calls, puts
 
-        # 주요 지표 계산
         call_vol = calls['volume'].sum()
         put_vol = puts['volume'].sum()
+        call_oi = calls['openInterest'].sum()
+        put_oi = puts['openInterest'].sum()
         pcr = put_vol / call_vol if call_vol > 0 else 0
 
-        # 💡 지표 표시 (가독성 향상 커스텀 HTML 적용)
         c1, c2, c3 = st.columns(3)
-        
-        status_color = "#f5a623"  # 중립 (밝은 주황/노란색으로 가독성 확보)
+        status_color = "#f5a623"
         status_text = "중립 (Neutral)"
         if pcr > 1.2: 
-            status_color = "#ff4d6d"  # 하락 (빨강)
-            status_text = "하락 신호 (Bearish)"
+            status_color, status_text = "#ff4d6d", "하락 신호 (Bearish)"
         elif pcr < 0.7: 
-            status_color = "#00e5a0"  # 상승 (초록)
-            status_text = "상승 신호 (Bullish)"
+            status_color, status_text = "#00e5a0", "상승 신호 (Bullish)"
 
         def get_metric_card(title, value, val_color, status="", stat_color="transparent"):
             return f"""
@@ -166,115 +125,145 @@ if ticker_input and selected_expiry:
                 </div>
             </div>
             """
+        with c1: st.markdown(get_metric_card("CALL 거래량", f"{int(call_vol):,}", "#00e5a0"), unsafe_allow_html=True)
+        with c2: st.markdown(get_metric_card("PUT 거래량", f"{int(put_vol):,}", "#ff4d6d"), unsafe_allow_html=True)
+        with c3: st.markdown(get_metric_card("Put/Call Ratio", f"{pcr:.2f}", "#f3f4f6", status_text, status_color), unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-        with c1:
-            st.markdown(get_metric_card("CALL 거래량", f"{int(call_vol):,}", "#00e5a0"), unsafe_allow_html=True)
-        with c2:
-            st.markdown(get_metric_card("PUT 거래량", f"{int(put_vol):,}", "#ff4d6d"), unsafe_allow_html=True)
-        with c3:
-            st.markdown(get_metric_card("Put/Call Ratio", f"{pcr:.2f}", "#f3f4f6", status_text, status_color), unsafe_allow_html=True)
-            
-        st.markdown("<br>", unsafe_allow_html=True) # 카드 아래 여백 추가
-
-        # Plotly 차트
+        # 차트
         fig = go.Figure()
         fig.add_trace(go.Bar(x=calls_chart['strike'], y=calls_chart['volume'], name='Calls', marker_color='#00e5a0'))
         fig.add_trace(go.Bar(x=puts_chart['strike'], y=-puts_chart['volume'], name='Puts', marker_color='#ff4d6d'))
-        
-        fig.update_layout(
-            title=f"행사가별 거래량 분포 (만기: {selected_expiry}) - 현재가 ±30% 구간",
-            barmode='relative', template="plotly_dark", height=400,
-            hovermode="x unified"
-        )
-        if current_price > 0:
-            fig.add_vline(x=current_price, line_dash="dash", line_color="white", annotation_text="현재가")
-        
+        fig.update_layout(title=f"행사가별 거래량 (만기: {selected_expiry})", barmode='relative', template="plotly_dark", height=400, hovermode="x unified")
+        if current_price > 0: fig.add_vline(x=current_price, line_dash="dash", line_color="white")
         st.plotly_chart(fig, use_container_width=True)
 
-        st.markdown("#### 📑 전체 옵션 체인 상세 데이터")
-        tab1, tab2 = st.tabs(["▲ CALL 옵션 상세", "▼ PUT 옵션 상세"])
-        with tab1:
-            st.dataframe(format_option_df(calls), use_container_width=True, hide_index=True)
-        with tab2:
-            st.dataframe(format_option_df(puts), use_container_width=True, hide_index=True)
+        prompt = f"""
+당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 바탕으로 시장 심리를 분석하세요.
+[분석 대상] {name} ({ticker_input}) / 만기일: {selected_expiry} / 현재가: ${current_price:,.2f}
+[단일 만기일 수급]
+- 콜옵션 거래량: {call_vol:,.0f} (OI: {call_oi:,.0f})
+- 풋옵션 거래량: {put_vol:,.0f} (OI: {put_oi:,.0f})
+- PCR: {pcr:.2f}
+지시사항: 단기 주가 방향을 예측하고 지지/저항선을 도출하여 한글 마크다운으로 요약하세요.
+"""
 
-    # --- 6. AI 분석 프롬프트 고도화 로직 ---
+# =====================================================================
+# 모드 2: 다중 기간 통합 분석 (새로 추가된 핵심 로직)
+# =====================================================================
+elif analysis_mode == "전체 기간 통합 분석 (단/중/장기)" and expirations:
+    st.info("💡 **단기(30일 이내), 중기(30~90일), 장기(90일 이상)** 만기일 옵션 데이터를 모두 수집하여 입체적으로 분석합니다.")
+    
+    with st.spinner("전체 만기일 데이터를 수집 중입니다... (만기일이 많을 경우 10~30초 소요)"):
+        today = datetime.today()
+        
+        # 기간별 집계 딕셔너리
+        term_data = {
+            "Short (단기/30일내)": {"call_vol": 0, "put_vol": 0, "call_oi": 0, "put_oi": 0},
+            "Mid (중기/30~90일)": {"call_vol": 0, "put_vol": 0, "call_oi": 0, "put_oi": 0},
+            "Long (장기/90일이상)": {"call_vol": 0, "put_vol": 0, "call_oi": 0, "put_oi": 0}
+        }
+        
+        # 진행바 표시
+        progress_bar = st.progress(0)
+        total_exps = len(expirations)
+        
+        # 모든 만기일을 순회하며 데이터 집계
+        for i, exp_date in enumerate(expirations):
+            try:
+                days_to_exp = (datetime.strptime(exp_date, "%Y-%m-%d") - today).days
+                
+                # 기간 분류
+                if days_to_exp <= 30: category = "Short (단기/30일내)"
+                elif days_to_exp <= 90: category = "Mid (중기/30~90일)"
+                else: category = "Long (장기/90일이상)"
+                
+                opt = ticker.option_chain(exp_date)
+                term_data[category]["call_vol"] += opt.calls['volume'].sum() if 'volume' in opt.calls else 0
+                term_data[category]["put_vol"] += opt.puts['volume'].sum() if 'volume' in opt.puts else 0
+                term_data[category]["call_oi"] += opt.calls['openInterest'].sum() if 'openInterest' in opt.calls else 0
+                term_data[category]["put_oi"] += opt.puts['openInterest'].sum() if 'openInterest' in opt.puts else 0
+                
+            except Exception as e:
+                pass
+            progress_bar.progress((i + 1) / total_exps)
+            
+        progress_bar.empty()
+
+        # 데이터 프레임 변환
+        df_terms = pd.DataFrame(term_data).T
+        df_terms['PCR (Volume)'] = df_terms['put_vol'] / df_terms['call_vol']
+        df_terms['PCR (OI)'] = df_terms['put_oi'] / df_terms['call_oi']
+        df_terms.fillna(0, inplace=True)
+
+        # 다중 기간 집계 차트 표시
+        st.markdown("#### 📊 기간별 수급 비교 (Term Structure)")
+        fig2 = go.Figure()
+        fig2.add_trace(go.Bar(x=df_terms.index, y=df_terms['call_vol'], name='CALL 거래량', marker_color='#00e5a0'))
+        fig2.add_trace(go.Bar(x=df_terms.index, y=df_terms['put_vol'], name='PUT 거래량', marker_color='#ff4d6d'))
+        fig2.update_layout(barmode='group', template='plotly_dark', height=400, hovermode="x unified")
+        st.plotly_chart(fig2, use_container_width=True)
+
+        st.markdown("#### 📑 기간별 데이터 요약")
+        display_df = df_terms.copy()
+        display_df.columns = ['Call 거래량', 'Put 거래량', 'Call 미결제약정', 'Put 미결제약정', 'PCR(거래량)', 'PCR(미결제)']
+        for col in ['Call 거래량', 'Put 거래량', 'Call 미결제약정', 'Put 미결제약정']:
+            display_df[col] = display_df[col].apply(lambda x: f"{int(x):,}")
+        for col in ['PCR(거래량)', 'PCR(미결제)']:
+            display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}")
+        st.dataframe(display_df, use_container_width=True)
+
+        # 다중 기간 전용 프롬프트 생성
+        prompt = f"""
+당신은 월스트리트의 시니어 파생상품 애널리스트입니다. 제공된 '{name} ({ticker_input})'의 [기간별(Term Structure) 옵션 수급 데이터]를 바탕으로 시장의 단기, 중기, 장기 시나리오를 입체적으로 분석하세요.
+
+[분석 대상]
+- 티커: {ticker_input} ({name})
+- 현재가: ${current_price:,.2f}
+
+[기간별 수급 데이터 (Volume & Open Interest)]
+1. 단기 (30일 이내):
+   - 콜 거래량: {df_terms.loc['Short (단기/30일내)']['call_vol']:,.0f} / 콜 OI: {df_terms.loc['Short (단기/30일내)']['call_oi']:,.0f}
+   - 풋 거래량: {df_terms.loc['Short (단기/30일내)']['put_vol']:,.0f} / 풋 OI: {df_terms.loc['Short (단기/30일내)']['put_oi']:,.0f}
+   - PCR (Volume): {df_terms.loc['Short (단기/30일내)']['PCR (Volume)']:.2f}
+
+2. 중기 (30일 ~ 90일):
+   - 콜 거래량: {df_terms.loc['Mid (중기/30~90일)']['call_vol']:,.0f} / 콜 OI: {df_terms.loc['Mid (중기/30~90일)']['call_oi']:,.0f}
+   - 풋 거래량: {df_terms.loc['Mid (중기/30~90일)']['put_vol']:,.0f} / 풋 OI: {df_terms.loc['Mid (중기/30~90일)']['put_oi']:,.0f}
+   - PCR (Volume): {df_terms.loc['Mid (중기/30~90일)']['PCR (Volume)']:.2f}
+
+3. 장기 (90일 이상):
+   - 콜 거래량: {df_terms.loc['Long (장기/90일이상)']['call_vol']:,.0f} / 콜 OI: {df_terms.loc['Long (장기/90일이상)']['call_oi']:,.0f}
+   - 풋 거래량: {df_terms.loc['Long (장기/90일이상)']['put_vol']:,.0f} / 풋 OI: {df_terms.loc['Long (장기/90일이상)']['put_oi']:,.0f}
+   - PCR (Volume): {df_terms.loc['Long (장기/90일이상)']['PCR (Volume)']:.2f}
+
+[분석 지시사항]
+1. **기간별 심리 변화(Term Structure):** 단기 트레이더들의 심리(투기/헤징)와 중장기 투자자들의 포지션(추세 확신)이 어떻게 다른지 입체적으로 비교 분석하세요.
+2. **다이버전스 캐치:** 단기 PCR과 장기 PCR이 크게 다르다면, 시장이 단기 조정을 겪더라도 장기적으로 우상향을 보는지(혹은 그 반대인지) 통찰력 있게 설명하세요.
+3. **종합 결론:** 위 3개 기간의 데이터를 종합했을 때, 향후 1~3개월간 예상되는 주가의 방향성 시나리오를 도출해 주세요.
+4. 초보자도 이해할 수 있도록 친절한 한글 마크다운으로 깔끔하게 정리하세요.
+"""
+
+# =====================================================================
+# 공통 AI 분석 섹션 (모드에 맞춰 생성된 프롬프트 전달)
+# =====================================================================
+if ticker_input and expirations and ((analysis_mode == "단일 만기일 분석" and selected_expiry) or analysis_mode != "단일 만기일 분석"):
     st.divider()
     st.subheader("🤖 Gemini AI 옵션 시장 브리핑")
     
-    # 추가 심층 데이터를 계산합니다.
-    try:
-        call_oi = calls['openInterest'].sum()
-        put_oi = puts['openInterest'].sum()
-        pcr_oi = put_oi / call_oi if call_oi > 0 else 0
-
-        def get_max_row(df, col):
-            if df.empty or df[col].isnull().all(): return None
-            return df.loc[df[col].idxmax()]
-
-        max_vol_call = get_max_row(calls, 'volume')
-        max_vol_put = get_max_row(puts, 'volume')
-        max_oi_call = get_max_row(calls, 'openInterest')
-        max_oi_put = get_max_row(puts, 'openInterest')
-
-        avg_iv_call = calls_chart['impliedVolatility'].mean() * 100 if not calls_chart.empty else 0
-        avg_iv_put = puts_chart['impliedVolatility'].mean() * 100 if not puts_chart.empty else 0
-
-        def fmt_val(row, col, is_price=False):
-            if row is None or pd.isna(row.get(col)): return "N/A"
-            return f"${row[col]:,.2f}" if is_price else f"{row[col]:,.0f}"
-            
-    except Exception as e:
-        call_oi, put_oi, pcr_oi, avg_iv_call, avg_iv_put = 0, 0, 0, 0, 0
-        max_vol_call, max_vol_put, max_oi_call, max_oi_put = None, None, None, None
-        def fmt_val(row, col, is_price=False): return "N/A"
-
-    prompt = f"""
-당신은 월스트리트의 시니어 파생상품 애널리스트입니다. 아래 제공된 '{name} ({ticker_input})'의 상세 옵션 체인 데이터를 심층적으로 분석하여 기관 투자자 수준의 시장 심리 및 방향성 브리핑을 작성하세요.
-
-[기본 정보]
-- 분석 대상: {name} ({ticker_input})
-- 현재가: ${current_price:,.2f}
-- 타겟 만기일: {selected_expiry}
-
-[수급 및 심리 데이터 (Volume & Open Interest)]
-- 콜옵션 (상승 배팅) - 총 거래량: {call_vol:,.0f} / 총 미결제약정(OI): {call_oi:,.0f}
-- 풋옵션 (하락 배팅) - 총 거래량: {put_vol:,.0f} / 총 미결제약정(OI): {put_oi:,.0f}
-- Put/Call Ratio (거래량 기준): {pcr:.2f} (일반적 평균 0.7~1.0)
-- Put/Call Ratio (OI 기준): {pcr_oi:.2f}
-
-[내재변동성 (Implied Volatility - 현재가 ±30% 근방 평균)]
-- 콜옵션 평균 IV: {avg_iv_call:.2f}%
-- 풋옵션 평균 IV: {avg_iv_put:.2f}%
-
-[핵심 매물대 및 지지/저항선 힌트 데이터]
-- 콜옵션 최대 거래량 행사가: {fmt_val(max_vol_call, 'strike', True)} (당일 거래량: {fmt_val(max_vol_call, 'volume')})
-- 콜옵션 최대 미결제약정 행사가: {fmt_val(max_oi_call, 'strike', True)} (누적 OI: {fmt_val(max_oi_call, 'openInterest')})
-- 풋옵션 최대 거래량 행사가: {fmt_val(max_vol_put, 'strike', True)} (당일 거래량: {fmt_val(max_vol_put, 'volume')})
-- 풋옵션 최대 미결제약정 행사가: {fmt_val(max_oi_put, 'strike', True)} (누적 OI: {fmt_val(max_oi_put, 'openInterest')})
-
-[분석 지시사항]
-1. **시장 심리 판독:** 제공된 PCR(거래량 및 OI)과 옵션 거래량 우위를 바탕으로 현재 시장이 탐욕(상승 확신)인지 공포(하락 대비 헤징) 상태인지 진단하세요.
-2. **지지선 및 저항선 도출:** 최대 거래량 및 미결제약정(OI)이 몰린 행사가(Strike)를 현재가(${current_price:,.2f})와 비교하여, 단기적으로 주가가 어디서 강력한 저항을 받고 어디서 지지를 받을지 구체적인 가격대를 짚어주세요.
-3. **변동성(IV) 해석:** 콜과 풋의 평균 IV 차이를 보고, 옵션 시장 참여자들이 급등과 급락 중 어느 쪽의 리스크에 더 높은 프리미엄을 지불하고 있는지 설명하세요.
-4. **스마트 머니 동향 추정:** 단순 당일 거래량(단기 투기)과 누적 미결제약정(장기 포지션)이 엇갈리거나 일치하는 부분을 찾아, 기관이나 스마트 머니의 진짜 의도를 추정해 보세요.
-5. **단기 매매 전략 제안:** 이 분석을 바탕으로 향후 트레이딩 시나리오(돌파 매수, 지지선 매수, 리스크 헷징 등)를 제안하세요.
-6. 전체 내용은 초보자도 이해할 수 있도록 친절하고 논리적인 **한글 마크다운** 형식으로 작성해 주세요.
-"""
-
     col_btn1, col_btn2 = st.columns(2)
 
     with col_btn1:
         st.markdown("#### 옵션 1. 스트림릿에서 바로 분석")
-        if st.button("✨ API 자동 분석 (약 10초 소요)", type="primary", use_container_width=True):
+        if st.button("✨ API 자동 분석 실행", type="primary", use_container_width=True):
             if has_api_key:
-                with st.spinner("AI가 방대한 데이터를 융합하여 분석하고 있습니다..."):
+                with st.spinner("AI가 데이터를 입체적으로 분석하고 있습니다..."):
                     try:
                         result, used_model = generate_with_fallback(prompt, api_key)
                         st.success(f"분석 완료! (사용한 모델: {used_model})")
                         st.markdown(f'<div class="report-box">{result}</div>', unsafe_allow_html=True)
                     except Exception as e:
-                        st.error(f"분석 중 오류 발생 (무료 한도 초과 등): {e}")
+                        st.error(f"분석 중 오류 발생: {e}")
             else:
                 st.error("API 키가 설정되지 않았습니다.")
 
@@ -304,6 +293,5 @@ if ticker_input and selected_expiry:
         """
         components.html(html_code, height=60)
 
-    # 생성된 프롬프트 내용 확인
     with st.expander("생성된 고도화 분석 프롬프트 내용 확인하기", expanded=False):
         st.code(prompt, language="text")
