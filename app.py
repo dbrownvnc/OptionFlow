@@ -432,8 +432,20 @@ with tab_analysis:
         filtered['side'] = side
         return filtered.sort_values('dollar_premium', ascending=False).head(5)
 
-    def calculate_max_pain(calls, puts):
+    def calculate_max_pain(calls, puts, current_price: float = 0, band: float = 0.4):
+        """
+        Max Pain 계산.
+        current_price > 0이면 현재가 ±band(기본 40%) 범위 내 행사가만 사용.
+        전체 체인 사용 시 Deep OTM 잔여 OI가 결과를 왜곡하는 버그 수정.
+        """
+        if current_price > 0:
+            lo_mp = current_price * (1 - band)
+            hi_mp = current_price * (1 + band)
+            calls = calls[(calls['strike'] >= lo_mp) & (calls['strike'] <= hi_mp)]
+            puts  = puts [(puts ['strike'] >= lo_mp) & (puts ['strike'] <= hi_mp)]
         strikes = sorted(set(calls['strike'].tolist() + puts['strike'].tolist()))
+        if not strikes:
+            return 0.0
         pain = {}
         for s in strikes:
             cp = ((s - calls.loc[calls['strike']<s,'strike'])
@@ -581,19 +593,30 @@ with tab_analysis:
             opt   = ticker.option_chain(selected_expiry)
             calls, puts = opt.calls.copy(), opt.puts.copy()
 
-            # DTE 계산
-            dte = max((datetime.strptime(selected_expiry,'%Y-%m-%d') - datetime.today()).days, 1)
+            # DTE 계산 (실제값 보존, 표시/계산용은 min 1)
+            dte_real = (datetime.strptime(selected_expiry,'%Y-%m-%d') - datetime.today()).days
+            dte      = max(dte_real, 1)
+
+            # 단기 만기 경고 배너
+            if dte_real <= 0:
+                st.error('⚠️ **만기 당일(DTE=0):** OI·IV 데이터 거의 소진. 모든 지표 신뢰도 매우 낮음.')
+            elif dte_real <= 2:
+                st.warning(f'⚠️ **초단기 만기(DTE={dte_real}일):** 대부분 OI 청산. Max Pain·OI Wall·IV 신뢰도 낮음.')
+            elif dte_real <= 5:
+                st.info(f'ℹ️ **단기 만기(DTE={dte_real}일):** IV 데이터 불안정 가능. EM 수치는 참고용으로만 활용.')
 
             # [개선②] ATM IV → Expected Move
-            atm_iv = get_atm_iv(calls, puts, current_price)
-            em_pct = expected_move_pct(current_price, atm_iv, dte)
+            atm_iv    = get_atm_iv(calls, puts, current_price)
+            em_pct    = expected_move_pct(current_price, atm_iv, dte)
+            em_source = 'ATM IV 기반' if atm_iv > 0 else '⚠️ Fallback(ATM IV=0, 고정 3%)'
 
             # [개선④] OI 스냅샷 저장
             save_oi_snapshot(ticker_input, selected_expiry, calls, puts)
 
-            # 필터 범위: EM 기반 (OI Wall용)
-            lo = current_price * (1 - em_pct * 2 / 100) if current_price > 0 else 0
-            hi = current_price * (1 + em_pct * 2 / 100) if current_price > 0 else 1e9
+            # 필터 범위: EM×2 기반, 최소 ±15% 보장 (DTE 짧을 때 범위 축소 방지)
+            em_band = max(em_pct * 2, 15.0)
+            lo = current_price * (1 - em_band / 100) if current_price > 0 else 0
+            hi = current_price * (1 + em_band / 100) if current_price > 0 else 1e9
             lo = max(lo, current_price * 0.6)
             hi = min(hi, current_price * 1.4)
             cc = calls[(calls['strike']>=lo)&(calls['strike']<=hi)].copy()
@@ -603,8 +626,16 @@ with tab_analysis:
             coi = calls['openInterest'].fillna(0).sum(); poi = puts['openInterest'].fillna(0).sum()
             pcr    = pv/cv    if cv>0   else 0
             pcr_oi = poi/coi  if coi>0  else 0
-            mp     = calculate_max_pain(calls, puts)
+
+            # [버그수정①] Max Pain: 현재가 ±40% 필터 적용
+            # 전체 체인 사용 시 Deep OTM 잔여 OI가 결과 왜곡 → $175 같은 엉뚱한 값 방지
+            mp     = calculate_max_pain(calls, puts, current_price, band=0.4)
             mp_gap = (mp - current_price) / current_price * 100 if current_price > 0 else 0
+
+            # OI Wall 신뢰도 체크 (DTE 짧으면 OI 거의 없음)
+            max_call_oi = cc['openInterest'].fillna(0).max() if not cc.empty else 0
+            max_put_oi  = pc['openInterest'].fillna(0).max() if not pc.empty else 0
+            oi_wall_reliable = (max_call_oi >= 100 or max_put_oi >= 100)
 
             # [개선③] IV OI가중+Trim / Volume가중+Trim
             iv_oi_c  = iv_weighted(cc, 'openInterest') * 100
@@ -621,14 +652,16 @@ with tab_analysis:
             with row1[0]: st.markdown(mc('CALL 거래량', f'{int(cv):,}', '#00e5a0'), unsafe_allow_html=True)
             with row1[1]: st.markdown(mc('PUT 거래량',  f'{int(pv):,}', '#ff4d6d'), unsafe_allow_html=True)
             with row1[2]: st.markdown(mc('PCR (Volume)', f'{pcr:.2f}', '#f3f4f6', pcr_sub, pcr_color), unsafe_allow_html=True)
-            with row1[3]: st.markdown(mc('Max Pain', f'${mp:,.0f}', '#fb923c', f'({mp_gap:+.1f}%)', mp_gap_color), unsafe_allow_html=True)
+            mp_lbl = 'Max Pain ⚠️' if dte_real <= 2 else 'Max Pain'
+            with row1[3]: st.markdown(mc(mp_lbl, f'${mp:,.0f}' if mp > 0 else 'N/A', '#fb923c', f'({mp_gap:+.1f}%)', mp_gap_color), unsafe_allow_html=True)
 
             st.markdown('<br>', unsafe_allow_html=True)
             row2 = st.columns(4)
             with row2[0]: st.markdown(mc('IV Call (OI가중)', f'{iv_oi_c:.1f}%',  '#00e5a0', f'Vol가중:{iv_vol_c:.1f}%', '#6ee7b7'), unsafe_allow_html=True)
             with row2[1]: st.markdown(mc('IV Put (OI가중)',  f'{iv_oi_p:.1f}%',  '#ff4d6d', f'Vol가중:{iv_vol_p:.1f}%', '#fca5a5'), unsafe_allow_html=True)
             with row2[2]: st.markdown(mc('IV Skew (Put-Call)', f'{iv_oi_p-iv_oi_c:+.1f}%p', '#a78bfa'), unsafe_allow_html=True)
-            with row2[3]: st.markdown(mc('Expected Move', f'±{em_pct:.1f}%',    '#fb923c', f'ATM IV:{atm_iv*100:.0f}%', '#9ca3af'), unsafe_allow_html=True)
+            em_color = '#9ca3af' if atm_iv > 0 else '#fbbf24'
+            with row2[3]: st.markdown(mc('Expected Move', f'±{em_pct:.1f}%', '#fb923c', em_source, em_color), unsafe_allow_html=True)
             st.markdown('<br>', unsafe_allow_html=True)
 
             # ── 차트: 거래량 ──
@@ -644,19 +677,27 @@ with tab_analysis:
             st.plotly_chart(fig, use_container_width=True)
 
             # ── 차트: OI Wall ──
+            if not oi_wall_reliable:
+                st.warning(f'⚠️ **OI Wall 신뢰도 낮음** (최대 OI={max(max_call_oi, max_put_oi):.0f}): '
+                           f'DTE={dte_real}일 만기 직전에는 대부분의 OI가 청산됩니다. Call/Put OI Wall 및 Max Pain은 참고용으로만 활용하세요.')
             fig_oi = go.Figure()
             fig_oi.add_trace(go.Bar(x=cc['strike'], y=cc['openInterest'],  name='Call OI', marker_color='rgba(0,229,160,.65)'))
             fig_oi.add_trace(go.Bar(x=pc['strike'], y=-pc['openInterest'], name='Put OI',  marker_color='rgba(255,77,109,.65)'))
             vlo = []
             if current_price>0: vlo.append((current_price,'white','dash',f'현재가 ${current_price:,.2f}',0.97))
             if mp>0:             vlo.append((mp,'#fb923c','dot',f'Max Pain ${mp:,.0f}',0.82))
-            if not cc.empty and not pc.empty:
+            # OI Wall: 신뢰도 있을 때만 표시, Call/Put Wall이 같으면 경고
+            if not cc.empty and not pc.empty and oi_wall_reliable:
                 cow = cc.loc[cc['openInterest'].fillna(0).idxmax(),'strike']
                 pow_= pc.loc[pc['openInterest'].fillna(0).idxmax(),'strike']
                 vlo.append((cow, '#00e5a0','dot',f'Call OI Wall(저항) ${cow:,.0f}',0.67))
-                vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f}', 0.52))
+                if pow_ != cow:  # 동일값이면 중복 어노테이션 생략
+                    vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f}', 0.52))
+                else:
+                    vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f} ⚠️동일', 0.52))
             add_vlines(fig_oi, vlo)
-            fig_oi.update_layout(title='행사가별 미결제약정 — OI Wall',
+            oi_title_suffix = ' ⚠️ 신뢰도 낮음(DTE 단기)' if not oi_wall_reliable else ''
+            fig_oi.update_layout(title=f'행사가별 미결제약정 — OI Wall{oi_title_suffix}',
                 barmode='relative', template='plotly_dark', height=400, hovermode='x unified')
             st.plotly_chart(fig_oi, use_container_width=True)
 
@@ -699,9 +740,10 @@ with tab_analysis:
 
             if mp>0:
                 mc4 = 'signal-bear' if mp_gap<-2 else ('signal-bull' if mp_gap>2 else 'signal-neut')
-                mb4 = (f'Max Pain ${mp:,.0f} — 현재가 대비 <strong>{mp_gap:.1f}%</strong> 아래 → 하락 수렴 압력' if mp_gap<-2 else
-                       (f'Max Pain ${mp:,.0f} — 현재가 대비 <strong>{mp_gap:+.1f}%</strong> 위 → 상승 수렴 압력' if mp_gap>2 else
-                        f'현재가 ≈ Max Pain ${mp:,.0f} → 횡보 압력'))
+                dte_warn = f' <span style="color:#fbbf24;font-size:11px;">(⚠️ DTE={dte_real}일 — 신뢰도 낮음)</span>' if dte_real <= 2 else ''
+                mb4 = (f'Max Pain ${mp:,.0f} — 현재가 대비 <strong>{mp_gap:.1f}%</strong> 아래 → 하락 수렴 압력{dte_warn}' if mp_gap<-2 else
+                       (f'Max Pain ${mp:,.0f} — 현재가 대비 <strong>{mp_gap:+.1f}%</strong> 위 → 상승 수렴 압력{dte_warn}' if mp_gap>2 else
+                        f'현재가 ≈ Max Pain ${mp:,.0f} → 횡보 압력{dte_warn}'))
                 st.markdown(sig(mc4,'④ Max Pain 수렴 신호',mb4), unsafe_allow_html=True)
 
             vc5,vm5 = vol_oi_signal(cv,pv,coi,poi)
@@ -710,12 +752,25 @@ with tab_analysis:
             if not cc.empty and not pc.empty:
                 cow  = cc.loc[cc['openInterest'].fillna(0).idxmax(),'strike']
                 pow_ = pc.loc[pc['openInterest'].fillna(0).idxmax(),'strike']
-                wc6  = 'signal-bear' if current_price>cow else ('signal-bull' if current_price<pow_ else 'signal-neut')
-                wb6  = (f'Call OI Wall(저항):<strong>${cow:,.0f}</strong> · Put OI Wall(지지):<strong>${pow_:,.0f}</strong>'
-                        +(' · 현재가가 Call OI Wall 돌파' if current_price>cow
-                          else (' · 현재가가 Put OI Wall 하회 → 추가 하락 리스크' if current_price<pow_
-                               else f' · 현재가 두 Wall 사이 → 범위 내 등락')))
-                st.markdown(sig(wc6,'⑥ OI Wall 지지/저항',wb6), unsafe_allow_html=True)
+                if not oi_wall_reliable:
+                    # OI 신뢰도 낮음 → 경고만
+                    st.markdown(sig('signal-neut','⑥ OI Wall 지지/저항',
+                        f'⚠️ <strong>OI 데이터 불충분</strong> (최대 Call OI={max_call_oi:.0f}, Put OI={max_put_oi:.0f}) — '
+                        f'DTE={dte_real}일 만기 직전 OI 소진. Wall 신호 신뢰 불가.'),
+                        unsafe_allow_html=True)
+                elif cow == pow_:
+                    # Call OI Wall = Put OI Wall 동일 → 데이터 sparse
+                    st.markdown(sig('signal-neut','⑥ OI Wall 지지/저항',
+                        f'⚠️ <strong>Call OI Wall = Put OI Wall = ${cow:,.0f} (동일값)</strong> — '
+                        f'OI가 특정 행사가에만 집중되거나 데이터 부족. 지지·저항 구분 불가.'),
+                        unsafe_allow_html=True)
+                else:
+                    wc6 = 'signal-bear' if current_price>cow else ('signal-bull' if current_price<pow_ else 'signal-neut')
+                    wb6 = (f'Call OI Wall(저항):<strong>${cow:,.0f}</strong> · Put OI Wall(지지):<strong>${pow_:,.0f}</strong>'
+                           +(' · 현재가가 Call OI Wall 돌파' if current_price>cow
+                             else (' · 현재가가 Put OI Wall 하회 → 추가 하락 리스크' if current_price<pow_
+                                  else f' · 현재가 두 Wall 사이 → 범위 내 등락')))
+                    st.markdown(sig(wc6,'⑥ OI Wall 지지/저항',wb6), unsafe_allow_html=True)
 
             # IV Skew
             iv_skew = iv_oi_p - iv_oi_c
@@ -751,10 +806,18 @@ with tab_analysis:
             uoa_str = uoa_all[['side','moneyness','strike','dollar_premium','V_OI']].to_string(index=False) if not uoa_all.empty else '없음'
             doi_str = df_doi[['side','strike','oi_today','oi_prev','delta_oi','signal']].to_string(index=False) if not df_doi.empty else '전일 데이터 없음 (수집 중)'
 
+            # 신뢰도 경고 문구 (프롬프트용)
+            data_quality_note = ''
+            if dte_real <= 2:
+                data_quality_note = f'\n⚠️ 데이터 신뢰도 주의: DTE={dte_real}일로 OI 대부분 소진. Max Pain/OI Wall/IV 신뢰도 낮음.'
+            elif atm_iv == 0:
+                data_quality_note = f'\n⚠️ EM Fallback: ATM IV=0으로 Expected Move는 고정 3% 사용. DTE 짧거나 IV 데이터 없음.'
+            oi_wall_note = f'Call OI Wall:{cow_v:,.0f} / Put OI Wall:{pow_v_:,.0f}' if oi_wall_reliable else '⚠️ OI Wall 신뢰 불가(OI 소진)'
+
             prompt = f"""당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 기반으로 분석하세요.
 
-[분석 대상] {ticker_input}({name}) | {type_label} | 만기:{selected_expiry} | DTE:{dte}일 | 현재가:${current_price:,.2f}
-PCR 기준: Bearish>{bear_th} / Bullish<{bull_th}
+[분석 대상] {ticker_input}({name}) | {type_label} | 만기:{selected_expiry} | DTE:{dte_real}일 | 현재가:${current_price:,.2f}
+PCR 기준: Bearish>{bear_th} / Bullish<{bull_th}{data_quality_note}
 
 [수급]
 콜Vol:{cv:,.0f} / 풋Vol:{pv:,.0f} / 콜OI:{coi:,.0f} / 풋OI:{poi:,.0f}
@@ -764,10 +827,10 @@ PCR(Vol):{pcr:.2f} / PCR(OI):{pcr_oi:.2f} / 다이버전스비율:{pcr/pcr_oi:.2
 Call: OI가중{iv_oi_c:.1f}% / Vol가중{iv_vol_c:.1f}%
 Put:  OI가중{iv_oi_p:.1f}% / Vol가중{iv_vol_p:.1f}%
 IV Skew(Put-Call): {iv_skew:+.1f}%p
-IV Expected Move(±1σ): ±{em_pct:.1f}% (ATM IV={atm_iv*100:.0f}%)
+IV Expected Move(±1σ): ±{em_pct:.1f}% [{em_source}]
 
-[Max Pain & OI Wall]
-Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / Call OI Wall:{cow_v:,.0f} / Put OI Wall:{pow_v_:,.0f}
+[Max Pain & OI Wall — 현재가 ±40% 행사가 기준]
+Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / {oi_wall_note}
 
 [UOA — Mid-Price + 차등Spread필터]
 {uoa_str}
@@ -779,7 +842,7 @@ Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / Call OI Wall:{cow_v:,.0f} / Put OI Wall:{p
 1. {type_label} 구조적 PCR 특성 반영한 수급 해석
 2. PCR 다이버전스 비율이 의미하는 당일 편향
 3. IV Skew(OI가중 vs Vol가중 차이)가 나타내는 공포/탐욕
-4. Max Pain 수렴 압력과 만기일 시나리오
+4. DTE와 데이터 신뢰도를 감안하여 Max Pain 수렴 압력 해석
 5. ΔOI로 본 스마트 머니 진입/청산 흐름
 6. UOA의 OTM 비율로 방향성 추론
 7. 종합 단기 주가 방향 + 핵심 가격 레벨
@@ -901,7 +964,7 @@ Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / Call OI Wall:{cow_v:,.0f} / Put OI Wall:{p
                 ne=term_data[t]['nearest_exp']
                 if ne:
                     try:
-                        o2=ticker.option_chain(ne); mp_per_term[t]=calculate_max_pain(o2.calls,o2.puts)
+                        o2=ticker.option_chain(ne); mp_per_term[t]=calculate_max_pain(o2.calls,o2.puts,current_price,band=0.4)
                     except: mp_per_term[t]=0
                 else: mp_per_term[t]=0
 
