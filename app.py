@@ -223,6 +223,24 @@ with tab_analysis:
         else:
             return "neut", "⚖️ 콜·풋 수급 혼재 → 방향성 불분명, 추가 지표 필요"
 
+    def add_vlines(fig, lines: list):
+        """
+        lines = [(x, color, dash, label, y_paper), ...]
+        y_paper: 0.0~1.0 (paper 좌표). 겹침 방지를 위해 각 라인마다 다르게 지정.
+        """
+        for x_val, color, dash, label, y_paper in lines:
+            fig.add_vline(x=x_val, line_dash=dash, line_color=color, line_width=1.5)
+            if label:
+                fig.add_annotation(
+                    x=x_val, y=y_paper, xref="x", yref="paper",
+                    text=label, showarrow=False,
+                    font=dict(color=color, size=11, family="monospace"),
+                    bgcolor="rgba(15,23,42,0.85)",
+                    bordercolor=color, borderwidth=1, borderpad=4,
+                    xanchor="left", yanchor="top",
+                    xshift=6
+                )
+
     def pcr_label(v):
         if v > 1.2:   return "signal-bull", f"PCR {v:.2f} — 풋 과쏠림(공포) · 역발상 반등 가능"
         elif v < 0.7: return "signal-bear", f"PCR {v:.2f} — 콜 과쏠림(탐욕) · 조정 경계"
@@ -304,10 +322,10 @@ with tab_analysis:
             fig = go.Figure()
             fig.add_trace(go.Bar(x=cc['strike'],y=cc['volume'],  name='Calls',marker_color='#00e5a0'))
             fig.add_trace(go.Bar(x=pc['strike'],y=-pc['volume'], name='Puts', marker_color='#ff4d6d'))
-            if current_price>0: fig.add_vline(x=current_price,line_dash="dash",line_color="white",
-                annotation_text=f"현재가 ${current_price:,.2f}",annotation_position="top right")
-            if mp>0: fig.add_vline(x=mp,line_dash="dot",line_color="#fb923c",
-                annotation_text=f"Max Pain ${mp:,.0f}",annotation_position="top left")
+            vlines_vol = []
+            if current_price>0: vlines_vol.append((current_price,"white","dash",f"현재가 ${current_price:,.2f}",0.97))
+            if mp>0:             vlines_vol.append((mp,"#fb923c","dot",f"Max Pain ${mp:,.0f}",0.82))
+            add_vlines(fig, vlines_vol)
             fig.update_layout(title=f"행사가별 거래량 (만기: {selected_expiry})",
                 barmode='relative',template="plotly_dark",height=400,hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
@@ -315,9 +333,10 @@ with tab_analysis:
             fig_oi = go.Figure()
             fig_oi.add_trace(go.Bar(x=cc['strike'],y=cc['openInterest'],  name='Call OI',marker_color='rgba(0,229,160,0.65)'))
             fig_oi.add_trace(go.Bar(x=pc['strike'],y=-pc['openInterest'], name='Put OI', marker_color='rgba(255,77,109,0.65)'))
-            if current_price>0: fig_oi.add_vline(x=current_price,line_dash="dash",line_color="white")
-            if mp>0: fig_oi.add_vline(x=mp,line_dash="dot",line_color="#fb923c",
-                annotation_text=f"Max Pain ${mp:,.0f}",annotation_position="top left")
+            vlines_oi = []
+            if current_price>0: vlines_oi.append((current_price,"white","dash",f"현재가 ${current_price:,.2f}",0.97))
+            if mp>0:             vlines_oi.append((mp,"#fb923c","dot",f"Max Pain ${mp:,.0f}",0.82))
+            add_vlines(fig_oi, vlines_oi)
             fig_oi.update_layout(title="행사가별 미결제약정 — OI Wall (지지·저항 지도)",
                 barmode='relative',template="plotly_dark",height=380,hovermode="x unified")
             st.plotly_chart(fig_oi, use_container_width=True)
@@ -555,13 +574,12 @@ with tab_analysis:
                     name='Call OI 합산',marker_color='rgba(0,229,160,0.7)'))
                 f3.add_trace(go.Bar(x=df_wall['strike'],y=-df_wall['put_oi'],
                     name='Put OI 합산', marker_color='rgba(255,77,109,0.7)'))
+                vlines_wall = []
                 if current_price>0:
-                    f3.add_vline(x=current_price,line_dash="dash",line_color="white",
-                        annotation_text=f"현재가 ${current_price:,.2f}",annotation_position="top right")
-                f3.add_vline(x=gw_all,line_dash="dot",line_color="#00e5a0",
-                    annotation_text=f"Gamma Wall(저항) ${gw_all:,.0f}",annotation_position="top left")
-                f3.add_vline(x=pw_all,line_dash="dot",line_color="#ff4d6d",
-                    annotation_text=f"Put Wall(지지) ${pw_all:,.0f}",annotation_position="top right")
+                    vlines_wall.append((current_price,"white","dash",f"현재가 ${current_price:,.2f}",0.97))
+                vlines_wall.append((gw_all,"#00e5a0","dot",f"Gamma Wall(저항) ${gw_all:,.0f}",0.82))
+                vlines_wall.append((pw_all,"#ff4d6d","dot",f"Put Wall(지지) ${pw_all:,.0f}",0.67))
+                add_vlines(f3, vlines_wall)
                 f3.update_layout(barmode='relative',template='plotly_dark',height=420,hovermode="x unified")
                 st.plotly_chart(f3, use_container_width=True)
 
