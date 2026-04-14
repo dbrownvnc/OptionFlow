@@ -68,97 +68,164 @@ with tab_help:
 
     st.markdown("""
     <div class="hcard pcr">
-      <div class="htitle">📊 1. PCR — 종목 유형별 임계값 자동 적용
+      <div class="htitle">📊 1. 풋/콜 비율 (PCR) — 시장의 공포와 탐욕 온도계
         <span class="hbadge badge-pcr">역발상 지표</span></div>
       <div class="hbody">
-        ETF(SPY/QQQ)는 기관 헤징 구조상 PCR이 구조적으로 높음 → 단일 임계값 불가.<br><br>
-        <table style="width:100%;border-collapse:collapse;">
-          <tr style="border-bottom:1px solid #334155;">
-            <th style="padding:6px 10px;color:#64748b;font-size:12px;text-align:left;">유형</th>
-            <th style="padding:6px 10px;color:#64748b;font-size:12px;">Bearish</th>
-            <th style="padding:6px 10px;color:#64748b;font-size:12px;">Bullish</th>
+        <strong>PCR이란?</strong> 하락에 베팅한 사람(풋옵션) ÷ 상승에 베팅한 사람(콜옵션)의 비율입니다.<br><br>
+        <strong>예시로 이해하기:</strong><br>
+        &nbsp;콜옵션 거래량 1,000건 / 풋옵션 거래량 1,200건이면 PCR = 1.2<br>
+        &nbsp;→ 사람들이 하락에 많이 베팅하고 있다는 뜻<br><br>
+        <strong>역발상으로 읽는 법 (핵심!):</strong><br>
+        &nbsp;PCR이 높다 = 모두가 하락을 두려워한다 → 이미 과도한 공포 → 곧 반등 가능성<br>
+        &nbsp;PCR이 낮다 = 모두가 상승을 확신한다 → 이미 과도한 낙관 → 곧 조정 가능성<br><br>
+        <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+          <tr style="border-bottom:1px solid #334155;background:#0f172a;">
+            <th style="padding:8px 12px;color:#64748b;font-size:11px;text-align:left;">종목 유형</th>
+            <th style="padding:8px 12px;color:#64748b;font-size:11px;">이 이상이면 하락 공포</th>
+            <th style="padding:8px 12px;color:#64748b;font-size:11px;">이 이하면 상승 과열</th>
+            <th style="padding:8px 12px;color:#64748b;font-size:11px;">왜 다른가?</th>
           </tr>
           <tr style="border-bottom:1px solid #1e293b;">
-            <td style="padding:6px 10px;color:#60a5fa;">ETF</td>
-            <td style="padding:6px 10px;color:#ff4d6d;text-align:center;">&gt; 1.5</td>
-            <td style="padding:6px 10px;color:#00e5a0;text-align:center;">&lt; 1.0</td>
+            <td style="padding:8px 12px;color:#60a5fa;">ETF (SPY, QQQ 등)</td>
+            <td style="padding:8px 12px;color:#ff4d6d;text-align:center;">&gt; 1.5</td>
+            <td style="padding:8px 12px;color:#00e5a0;text-align:center;">&lt; 1.0</td>
+            <td style="padding:8px 12px;color:#64748b;font-size:11px;">기관이 보험용으로 풋 많이 삼</td>
           </tr>
           <tr>
-            <td style="padding:6px 10px;color:#00e5a0;">개별주</td>
-            <td style="padding:6px 10px;color:#ff4d6d;text-align:center;">&gt; 1.2</td>
-            <td style="padding:6px 10px;color:#00e5a0;text-align:center;">&lt; 0.7</td>
+            <td style="padding:8px 12px;color:#00e5a0;">개별 주식 (AAPL 등)</td>
+            <td style="padding:8px 12px;color:#ff4d6d;text-align:center;">&gt; 1.2</td>
+            <td style="padding:8px 12px;color:#00e5a0;text-align:center;">&lt; 0.7</td>
+            <td style="padding:8px 12px;color:#64748b;font-size:11px;">개인 투자자 비중이 높음</td>
           </tr>
         </table><br>
-        <strong>PCR 다이버전스:</strong> PCR(Vol)/PCR(OI) 비율 기반 (절댓값 비교보다 정확)<br>
-        &nbsp;비율 &gt; 1.5 → 오늘 풋 급증 (단기 공포) · 비율 &lt; 0.67 → 오늘 콜 급증 (단기 탐욕)
+        <strong>PCR 다이버전스 (고급):</strong> 오늘 PCR이 누적 PCR보다 1.5배 이상 크면<br>
+        &nbsp;→ 오늘 갑자기 풋을 많이 샀다는 뜻 → 단기 공포 이벤트 가능성
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="hcard uoa">
-      <div class="htitle">🔥 2. UOA — Mid-Price + 동적 Moneyness (v3 신규)
-        <span class="hbadge badge-uoa">스마트 머니</span></div>
+      <div class="htitle">🔥 2. 비정상 거래량 (UOA) — 스마트 머니가 움직였나?
+        <span class="hbadge badge-uoa">스마트 머니 감지</span></div>
       <div class="hbody">
-        <strong>▸ v3 개선 ①: Mid-Price Dollar Premium</strong><br>
-        &nbsp;bid &gt; 0 → MidPrice = (Bid+Ask)/2 사용 (과거 체결가 lastPrice보다 현재 시장가에 근접)<br>
-        &nbsp;bid = 0 → lastPrice 폴백 (ask/2보다 실제 체결가에 가까움)<br>
-        &nbsp;Dollar Premium = MidPrice × Volume × 100<br><br>
-        <strong>▸ v3 개선 ②: 차등 Spread 필터</strong><br>
-        &nbsp;<span class="htag">ATM</span> (Ask-Bid)/Mid &gt; 30% → 제거 (유동성 부족)<br>
-        &nbsp;<span class="htag">OTM</span> (Ask-Bid)/Mid &gt; 60% → 제거 (OTM은 구조적 고스프레드 허용)<br><br>
-        <strong>▸ v3 개선 ③: IV Expected Move 기반 동적 Moneyness</strong><br>
-        &nbsp;고정 ±3% 대신 <code>Price × IV × √(DTE/365)</code>로 종목별 맞춤 ATM 구간 산출<br>
-        &nbsp;NVDA(IV=75%): ±10.4% / SPY(IV=13%): ±1.8% — 종목 특성 자동 반영
+        <strong>UOA란?</strong> 평소와 달리 특정 행사가에 <strong>갑자기 대량의 거래</strong>가 터지는 현상입니다.<br>
+        마치 경마에서 특정 말에 갑자기 큰돈이 몰리는 것과 같습니다.<br><br>
+        <strong>이 앱의 탐지 기준:</strong><br>
+        &nbsp;<span class="htag">V/OI ≥ 5배</span> : 미결제약정(쌓인 계약)의 5배 이상이 하루에 거래됨<br>
+        &nbsp;<span class="htag">Dollar Premium ≥ $10K</span> : 실제 투입 자금이 1만 달러 이상 (소액 잡음 제거)<br>
+        &nbsp;<span class="htag">Spread 필터</span> : 호가 간격이 너무 벌어진 비유동 옵션 자동 제거<br><br>
+        <strong>옵션 위치(Moneyness)로 읽는 법:</strong><br>
+        &nbsp;<span class="htag">OTM 콜 대량 매수</span> → "주가 급등을 확신"하고 베팅한 신호 (강한 투기)<br>
+        &nbsp;<span class="htag">OTM 풋 대량 매수</span> → "주가 급락"을 예상하거나 주식 보유자가 보험을 든 것<br>
+        &nbsp;<span class="htag">ATM 옵션 대량 매수</span> → 방향보다 "변동성 이벤트"(실적 발표 등)에 베팅<br><br>
+        ⚠️ 무조건 따라가면 안 됩니다. 기관이 현물 손실을 막으려고 풋을 사기도 합니다.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="hcard voi">
-      <div class="htitle">📉 3. IV — OI가중 + Volume가중 + Trim (v3 신규)
-        <span class="hbadge badge-voi">변동성</span></div>
+      <div class="htitle">🔁 3. 거래량 × 미결제약정 교차 분석 — 새 돈인가, 나가는 돈인가?
+        <span class="hbadge badge-voi">추세 신뢰도</span></div>
       <div class="hbody">
-        <strong>▸ 극단값 Trim (5% ~ 300%):</strong> 비유동성 옵션의 극단적 IV(수백%) 제거<br>
-        &nbsp;검증: 단순평균 오차 48%p → Trim 후 오차 0.3%p (정확도 160배 향상)<br><br>
-        <strong>▸ 두 가지 가중 방법 병행 표시:</strong><br>
-        &nbsp;<span class="htag">OI 가중</span> 누적 포지션 기반 — 구조적 심리 반영<br>
-        &nbsp;<span class="htag">Vol 가중</span> 당일 거래 기반 — 오늘의 시장 심리 반영 (VIX 방식)<br>
-        &nbsp;두 값이 크게 다르면 → 당일 수급이 평소와 다름을 의미
+        <strong>핵심 개념:</strong><br>
+        &nbsp;거래량 = 오늘 거래된 계약 수<br>
+        &nbsp;미결제약정(OI) = 아직 안 닫힌 계약 수 (어제 기준)<br><br>
+        <strong>두 가지를 함께 보면:</strong><br>
+        <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+          <tr style="border-bottom:1px solid #334155;background:#0f172a;">
+            <th style="padding:8px;color:#64748b;font-size:11px;">거래량</th>
+            <th style="padding:8px;color:#64748b;font-size:11px;">미결제약정</th>
+            <th style="padding:8px;color:#64748b;font-size:11px;">의미</th>
+            <th style="padding:8px;color:#64748b;font-size:11px;">주가 추세</th>
+          </tr>
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:8px;color:#00e5a0;text-align:center;">↑ 증가</td>
+            <td style="padding:8px;color:#00e5a0;text-align:center;">↑ 증가</td>
+            <td style="padding:8px;color:#e2e8f0;">새 돈이 들어오는 중</td>
+            <td style="padding:8px;color:#00e5a0;">추세 강하게 지속 ✅</td>
+          </tr>
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:8px;color:#00e5a0;text-align:center;">↑ 증가</td>
+            <td style="padding:8px;color:#ff4d6d;text-align:center;">↓ 감소</td>
+            <td style="padding:8px;color:#e2e8f0;">기존 투자자들이 팔고 나감</td>
+            <td style="padding:8px;color:#ff4d6d;">반전 경계 ⚠️</td>
+          </tr>
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:8px;color:#ff4d6d;text-align:center;">↓ 감소</td>
+            <td style="padding:8px;color:#00e5a0;text-align:center;">↑ 증가</td>
+            <td style="padding:8px;color:#e2e8f0;">조용히 포지션 쌓는 중</td>
+            <td style="padding:8px;color:#f5a623;">대기 매수 관찰 🔍</td>
+          </tr>
+          <tr>
+            <td style="padding:8px;color:#ff4d6d;text-align:center;">↓ 감소</td>
+            <td style="padding:8px;color:#ff4d6d;text-align:center;">↓ 감소</td>
+            <td style="padding:8px;color:#e2e8f0;">에너지가 빠지고 있음</td>
+            <td style="padding:8px;color:#ff4d6d;">전환점 임박 🔄</td>
+          </tr>
+        </table><br>
+        ⚠️ 한계: yfinance OI는 어제 기준이라 오늘 생긴 새 포지션은 내일 확인 가능합니다.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="hcard mp">
+      <div class="htitle">🎯 4. 맥스 페인 & OI Wall — 만기일의 자석과 가격 벽
+        <span class="hbadge badge-mp">만기일 자석 + 지지/저항</span></div>
+      <div class="hbody">
+        <strong>맥스 페인(Max Pain)이란?</strong><br>
+        옵션을 판 사람(주로 기관·증권사)이 가장 큰 이익을 보는 가격 = 옵션을 산 사람들이 가장 큰 손실을 보는 가격입니다.<br><br>
+        <strong>왜 중요한가?</strong><br>
+        &nbsp;만기일이 가까울수록 주가가 맥스 페인 가격으로 끌려가는 경향이 있습니다.<br>
+        &nbsp;(마켓 메이커들이 델타 헤징을 통해 자연스럽게 이 방향으로 움직이기 때문)<br><br>
+        <strong>읽는 법:</strong><br>
+        &nbsp;<span class="htag">현재가 > Max Pain</span> → 주가가 아래로 당겨질 가능성 (현재가 대비 음수%로 표시)<br>
+        &nbsp;<span class="htag">현재가 < Max Pain</span> → 주가가 위로 당겨질 가능성 (현재가 대비 양수%로 표시)<br><br>
+        <strong>OI Wall이란?</strong><br>
+        &nbsp;미결제약정이 특정 행사가에 대거 몰려 있으면, 그 가격이 지지선 또는 저항선 역할을 합니다.<br>
+        &nbsp;<span class="htag">Call OI 최대 행사가</span> → 저항선 (주가가 오르려 해도 막힘)<br>
+        &nbsp;<span class="htag">Put OI 최대 행사가</span> → 지지선 (주가가 내려가도 막힘)<br><br>
+        ⚠️ DTE가 짧을수록(만기가 임박할수록) 신뢰도가 낮아집니다. 경고 배너를 확인하세요.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="hcard db">
-      <div class="htitle">💾 4. SQLite ΔOI — 전일 대비 미결제약정 증감 (v3 신규)
+      <div class="htitle">💾 5. ΔOI (미결제약정 증감) — 어제 누가 들어오고 나갔나?
         <span class="hbadge badge-db">ΔOI 추적</span></div>
       <div class="hbody">
-        yfinance OI는 전날 장마감 기준 → 앱 실행 시마다 스냅샷 저장 → 다음날 비교<br><br>
-        <strong>▸ 신호 해석:</strong><br>
-        &nbsp;<span class="htag">Vol↑ + ΔOI↑</span> 신규 대형 베팅 진입 (스마트 머니 가능성 ↑)<br>
-        &nbsp;<span class="htag">Vol↑ + ΔOI↓</span> 대형 청산 / 롤오버<br>
-        &nbsp;<span class="htag">Vol↓ + ΔOI↑</span> 조용한 포지션 축적<br>
-        &nbsp;<span class="htag">Vol↓ + ΔOI↓</span> 추세 에너지 방전<br><br>
-        <strong>▸ 저장 위치:</strong> 로컬 실행 → <code>options_oi.db</code> (영구 보존)<br>
-        &nbsp;Streamlit Cloud → <code>st.session_state</code> 메모리 (세션 내 유지)<br>
-        &nbsp;데이터 누적 시작 후 다음날부터 ΔOI 표시 가능
+        <strong>ΔOI란?</strong> 오늘 OI에서 어제 OI를 뺀 값입니다.<br>
+        &nbsp;= 어제와 비교해 계약이 늘었는지(신규 진입) 줄었는지(청산) 보여줍니다.<br><br>
+        <strong>거래량과 함께 보면:</strong><br>
+        &nbsp;<span class="htag">거래량 많음 + OI 늘었음</span> → 새로운 큰 베팅이 들어온 것 🔥<br>
+        &nbsp;<span class="htag">거래량 많음 + OI 줄었음</span> → 기존 포지션을 정리하고 나간 것 ✂️<br>
+        &nbsp;<span class="htag">거래량 적음 + OI 늘었음</span> → 조용히 포지션을 축적 중 🤫<br><br>
+        <strong>이 앱의 저장 방식:</strong><br>
+        &nbsp;앱을 실행할 때마다 OI를 저장 → 다음날 비교하면 ΔOI 계산 가능<br>
+        &nbsp;로컬 실행 시 파일로 영구 보존 / Streamlit Cloud는 탭을 닫으면 초기화
       </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="hcard warn">
-      <div class="htitle">⚠️ 데이터 한계 및 주의사항
+      <div class="htitle">⚠️ 이 앱의 한계 — 반드시 읽어주세요
         <span class="hbadge badge-warn">필독</span></div>
       <div class="hbody">
-        <strong>yfinance 구조적 한계 (유료 API 없이 해결 불가):</strong><br>
-        &nbsp;· OI 업데이트: 전날 장마감 기준 (당일 신규 포지션 미반영)<br>
-        &nbsp;· Greeks(Δ,Γ,θ,ν): 미제공 → Gamma Wall 계산 불가<br>
-        &nbsp;· Sweep/Block 탐지: 거래소별 틱 데이터 미제공<br>
-        &nbsp;· Bid/Ask: 지연 데이터 (실시간 NBBO 아님)<br><br>
-        풋옵션 매수 ≠ 무조건 하락 배팅. 헤징과 투기를 구분해야 합니다.<br>
-        이 앱의 결과는 <strong>투자 참고용</strong>이며 최종 판단은 본인 책임입니다.
+        <strong>무료 데이터(yfinance) 구조적 한계:</strong><br>
+        &nbsp;📅 OI 데이터: 항상 어제 장마감 기준 (오늘 생긴 포지션은 내일 확인 가능)<br>
+        &nbsp;⏱️ Bid/Ask: 실시간이 아닌 지연 데이터<br>
+        &nbsp;🔢 Greeks(델타·감마·세타·베가): yfinance 미제공<br>
+        &nbsp;📡 Sweep/Block 탐지: 거래소별 틱 데이터 없어서 불가<br><br>
+        <strong>해석할 때 항상 기억하세요:</strong><br>
+        &nbsp;• <strong>풋 매수 = 무조건 하락 예상 ❌</strong> (기관은 주식 보유 중 손실 방어용으로 풋을 삼)<br>
+        &nbsp;• 이 앱의 신호는 여러 지표 중 하나, 주가 차트·뉴스·실적과 함께 봐야 함<br>
+        &nbsp;• 최종 투자 판단은 항상 본인 책임입니다<br><br>
+        <strong>신뢰도 높은 상황:</strong> DTE 7일 이상 · OI 충분 · 만기 전날 이전<br>
+        <strong>신뢰도 낮은 상황:</strong> DTE 1~2일 · OI Wall 비어있음 · IV=0 (Fallback)
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -432,26 +499,43 @@ with tab_analysis:
         filtered['side'] = side
         return filtered.sort_values('dollar_premium', ascending=False).head(5)
 
-    def calculate_max_pain(calls, puts, current_price: float = 0, band: float = 0.4):
+    def get_mp_band(dte: int) -> float:
+        """DTE 기반 Max Pain 계산 범위 (짧을수록 좁게)."""
+        if dte <= 2:   return 0.15   # ±15%: DTE 1~2일, Deep OTM 제외
+        elif dte <= 7: return 0.20   # ±20%: 1주일 이내
+        elif dte <= 14: return 0.25  # ±25%: 2주 이내
+        elif dte <= 30: return 0.30  # ±30%: 1개월 이내
+        else:           return 0.40  # ±40%: 장기
+
+    def calculate_max_pain(calls, puts, current_price: float = 0, dte: int = 60):
         """
         Max Pain 계산.
-        current_price > 0이면 현재가 ±band(기본 40%) 범위 내 행사가만 사용.
-        전체 체인 사용 시 Deep OTM 잔여 OI가 결과를 왜곡하는 버그 수정.
+        DTE 기반 동적 band로 Deep OTM 잔여 OI 왜곡 방지.
+        - DTE≤2: ±15% (NVDA $189 기준 $161~$218, $115 제외)
+        - DTE>30: ±40%
         """
+        band = get_mp_band(dte)
         if current_price > 0:
             lo_mp = current_price * (1 - band)
             hi_mp = current_price * (1 + band)
             calls = calls[(calls['strike'] >= lo_mp) & (calls['strike'] <= hi_mp)]
             puts  = puts [(puts ['strike'] >= lo_mp) & (puts ['strike'] <= hi_mp)]
+        # OI 정수 정규화 (소수점 잔재 OI 제거)
+        calls = calls.copy(); puts = puts.copy()
+        calls['openInterest'] = calls['openInterest'].fillna(0).round().astype(int)
+        puts ['openInterest'] = puts ['openInterest'].fillna(0).round().astype(int)
+        # 실질 OI가 없는 행사가 제거
+        calls = calls[calls['openInterest'] > 0]
+        puts  = puts [puts ['openInterest'] > 0]
         strikes = sorted(set(calls['strike'].tolist() + puts['strike'].tolist()))
         if not strikes:
             return 0.0
         pain = {}
         for s in strikes:
             cp = ((s - calls.loc[calls['strike']<s,'strike'])
-                  * calls.loc[calls['strike']<s,'openInterest'].fillna(0)).sum()
+                  * calls.loc[calls['strike']<s,'openInterest']).sum()
             pp = ((puts.loc[puts['strike']>s,'strike'] - s)
-                  * puts.loc[puts['strike']>s,'openInterest'].fillna(0)).sum()
+                  * puts.loc[puts['strike']>s,'openInterest']).sum()
             pain[s] = cp + pp
         return min(pain, key=pain.get) if pain else 0.0
 
@@ -629,7 +713,7 @@ with tab_analysis:
 
             # [버그수정①] Max Pain: 현재가 ±40% 필터 적용
             # 전체 체인 사용 시 Deep OTM 잔여 OI가 결과 왜곡 → $175 같은 엉뚱한 값 방지
-            mp     = calculate_max_pain(calls, puts, current_price, band=0.4)
+            mp     = calculate_max_pain(calls, puts, current_price, dte=dte_real)
             mp_gap = (mp - current_price) / current_price * 100 if current_price > 0 else 0
 
             # OI Wall 신뢰도 체크 (DTE 짧으면 OI 거의 없음)
@@ -664,42 +748,104 @@ with tab_analysis:
             with row2[3]: st.markdown(mc('Expected Move', f'±{em_pct:.1f}%', '#fb923c', em_source, em_color), unsafe_allow_html=True)
             st.markdown('<br>', unsafe_allow_html=True)
 
-            # ── 차트: 거래량 ──
+            # ── OI 소수점 정규화 (수평선 버그 수정) ──
+            cc['openInterest'] = cc['openInterest'].fillna(0).round().astype(int)
+            pc['openInterest'] = pc['openInterest'].fillna(0).round().astype(int)
+            cc_oi = cc[cc['openInterest'] > 0]   # 실질 OI 있는 행만
+            pc_oi = pc[pc['openInterest'] > 0]
+
+            # x축 공통 범위 (쏠림 방지)
+            all_strikes = pd.concat([cc['strike'], pc['strike']])
+            if not all_strikes.empty:
+                x_lo = max(all_strikes.min() - 2.5, lo - 2.5)
+                x_hi = min(all_strikes.max() + 2.5, hi + 2.5)
+            else:
+                x_lo, x_hi = lo, hi
+            xaxis_cfg = dict(range=[x_lo, x_hi])
+
+            # ── 차트 1: 거래량 (Call↑ / Put↓, 텍스트 레이블 포함) ──
             fig = go.Figure()
-            fig.add_trace(go.Bar(x=cc['strike'], y=cc['volume'],  name='Calls', marker_color='#00e5a0'))
-            fig.add_trace(go.Bar(x=pc['strike'], y=-pc['volume'], name='Puts',  marker_color='#ff4d6d'))
+            fig.add_trace(go.Bar(
+                x=cc['strike'], y=cc['volume'], name='Call Vol', marker_color='#00e5a0',
+                text=cc['volume'].apply(lambda v: f'{int(v/1000)}K' if v>=1000 else str(int(v)) if v>0 else ''),
+                textposition='outside', textfont=dict(size=9,color='#00e5a0')
+            ))
+            fig.add_trace(go.Bar(
+                x=pc['strike'], y=-pc['volume'], name='Put Vol', marker_color='#ff4d6d',
+                text=pc['volume'].apply(lambda v: f'-{int(v/1000)}K' if v>=1000 else (f'-{int(v)}' if v>0 else '')),
+                textposition='outside', textfont=dict(size=9,color='#ff4d6d')
+            ))
             vl = []
             if current_price>0: vl.append((current_price,'white','dash',f'현재가 ${current_price:,.2f}',0.97))
-            if mp>0:             vl.append((mp,'#fb923c','dot',f'Max Pain ${mp:,.0f}',0.82))
+            if mp>0:             vl.append((mp,'#fb923c','dot',f'Max Pain ${mp:,.0f} (DTE band ±{get_mp_band(dte_real)*100:.0f}%)',0.82))
             add_vlines(fig, vl)
-            fig.update_layout(title=f'행사가별 거래량 (만기:{selected_expiry} · DTE:{dte}일 · EM:±{em_pct:.1f}%)',
-                barmode='relative', template='plotly_dark', height=400, hovermode='x unified')
+            fig.update_layout(
+                title=f'① 행사가별 거래량 · 만기:{selected_expiry} · DTE:{dte_real}일 · EM:±{em_pct:.1f}%',
+                barmode='relative', template='plotly_dark', height=420, hovermode='x unified',
+                xaxis=xaxis_cfg, yaxis_title='계약수 (Call↑ / Put↓)',
+                legend=dict(orientation='h', y=1.02))
             st.plotly_chart(fig, use_container_width=True)
 
-            # ── 차트: OI Wall ──
+            # ── 차트 2: OI Wall (실질 OI만 표시) ──
             if not oi_wall_reliable:
-                st.warning(f'⚠️ **OI Wall 신뢰도 낮음** (최대 OI={max(max_call_oi, max_put_oi):.0f}): '
-                           f'DTE={dte_real}일 만기 직전에는 대부분의 OI가 청산됩니다. Call/Put OI Wall 및 Max Pain은 참고용으로만 활용하세요.')
+                st.warning(f'⚠️ **OI Wall 신뢰도 낮음** (최대 OI={max(max_call_oi,max_put_oi):.0f}): '
+                           f'DTE={dte_real}일 만기 직전 OI 소진. 참고용으로만 활용.')
             fig_oi = go.Figure()
-            fig_oi.add_trace(go.Bar(x=cc['strike'], y=cc['openInterest'],  name='Call OI', marker_color='rgba(0,229,160,.65)'))
-            fig_oi.add_trace(go.Bar(x=pc['strike'], y=-pc['openInterest'], name='Put OI',  marker_color='rgba(255,77,109,.65)'))
+            if not cc_oi.empty:
+                fig_oi.add_trace(go.Bar(
+                    x=cc_oi['strike'], y=cc_oi['openInterest'], name='Call OI',
+                    marker_color='rgba(0,229,160,.7)',
+                    text=cc_oi['openInterest'].apply(lambda v: f'{int(v/1000)}K' if v>=1000 else str(int(v))),
+                    textposition='outside', textfont=dict(size=9,color='#6ee7b7')
+                ))
+            if not pc_oi.empty:
+                fig_oi.add_trace(go.Bar(
+                    x=pc_oi['strike'], y=-pc_oi['openInterest'], name='Put OI',
+                    marker_color='rgba(255,77,109,.7)',
+                    text=pc_oi['openInterest'].apply(lambda v: f'-{int(v/1000)}K' if v>=1000 else f'-{int(v)}'),
+                    textposition='outside', textfont=dict(size=9,color='#fca5a5')
+                ))
             vlo = []
             if current_price>0: vlo.append((current_price,'white','dash',f'현재가 ${current_price:,.2f}',0.97))
             if mp>0:             vlo.append((mp,'#fb923c','dot',f'Max Pain ${mp:,.0f}',0.82))
-            # OI Wall: 신뢰도 있을 때만 표시, Call/Put Wall이 같으면 경고
-            if not cc.empty and not pc.empty and oi_wall_reliable:
-                cow = cc.loc[cc['openInterest'].fillna(0).idxmax(),'strike']
-                pow_= pc.loc[pc['openInterest'].fillna(0).idxmax(),'strike']
-                vlo.append((cow, '#00e5a0','dot',f'Call OI Wall(저항) ${cow:,.0f}',0.67))
-                if pow_ != cow:  # 동일값이면 중복 어노테이션 생략
-                    vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f}', 0.52))
-                else:
-                    vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f} ⚠️동일', 0.52))
+            if not cc_oi.empty and not pc_oi.empty and oi_wall_reliable:
+                cow  = cc_oi.loc[cc_oi['openInterest'].idxmax(),'strike']
+                pow_ = pc_oi.loc[pc_oi['openInterest'].idxmax(),'strike']
+                vlo.append((cow,'#00e5a0','dot',f'Call OI Wall(저항) ${cow:,.0f}',0.67))
+                vlo.append((pow_,'#ff4d6d','dot',f'Put OI Wall(지지) ${pow_:,.0f}{'⚠️동일' if pow_==cow else ''}',0.52))
             add_vlines(fig_oi, vlo)
-            oi_title_suffix = ' ⚠️ 신뢰도 낮음(DTE 단기)' if not oi_wall_reliable else ''
-            fig_oi.update_layout(title=f'행사가별 미결제약정 — OI Wall{oi_title_suffix}',
-                barmode='relative', template='plotly_dark', height=400, hovermode='x unified')
+            oi_sfx = ' ⚠️ 신뢰도 낮음(DTE 단기)' if not oi_wall_reliable else ''
+            fig_oi.update_layout(
+                title=f'② 행사가별 미결제약정 — OI Wall{oi_sfx}',
+                barmode='relative', template='plotly_dark', height=420, hovermode='x unified',
+                xaxis=xaxis_cfg, yaxis_title='OI (Call↑ / Put↓)',
+                legend=dict(orientation='h', y=1.02))
             st.plotly_chart(fig_oi, use_container_width=True)
+
+            # ── 차트 3: IV Smile (행사가별 내재변동성) ──
+            iv_c_smile = cc[cc['impliedVolatility'].between(0.05,3.0)][['strike','impliedVolatility']].copy() if 'impliedVolatility' in cc.columns else pd.DataFrame()
+            iv_p_smile = pc[pc['impliedVolatility'].between(0.05,3.0)][['strike','impliedVolatility']].copy() if 'impliedVolatility' in pc.columns else pd.DataFrame()
+            if not iv_c_smile.empty or not iv_p_smile.empty:
+                fig_iv = go.Figure()
+                if not iv_c_smile.empty:
+                    fig_iv.add_trace(go.Scatter(
+                        x=iv_c_smile['strike'], y=iv_c_smile['impliedVolatility']*100,
+                        mode='lines+markers', name='Call IV(%)',
+                        line=dict(color='#00e5a0',width=2), marker=dict(size=5)))
+                if not iv_p_smile.empty:
+                    fig_iv.add_trace(go.Scatter(
+                        x=iv_p_smile['strike'], y=iv_p_smile['impliedVolatility']*100,
+                        mode='lines+markers', name='Put IV(%)',
+                        line=dict(color='#ff4d6d',width=2,dash='dot'), marker=dict(size=5)))
+                if current_price>0:
+                    fig_iv.add_vline(x=current_price,line_dash='dash',line_color='white',
+                        annotation_text=f'ATM ${current_price:,.0f}',annotation_position='top right')
+                fig_iv.update_layout(
+                    title='③ IV Smile — 행사가별 내재변동성 (낮을수록 ATM, 높을수록 OTM 공포 프리미엄)',
+                    template='plotly_dark', height=360, hovermode='x unified',
+                    xaxis=xaxis_cfg, yaxis_title='내재변동성 IV (%)',
+                    legend=dict(orientation='h',y=1.02))
+                st.plotly_chart(fig_iv, use_container_width=True)
 
             # ── ΔOI 차트 ──
             df_doi = get_delta_oi(ticker_input, selected_expiry, calls, puts, current_price)
@@ -814,39 +960,74 @@ with tab_analysis:
                 data_quality_note = f'\n⚠️ EM Fallback: ATM IV=0으로 Expected Move는 고정 3% 사용. DTE 짧거나 IV 데이터 없음.'
             oi_wall_note = f'Call OI Wall:{cow_v:,.0f} / Put OI Wall:{pow_v_:,.0f}' if oi_wall_reliable else '⚠️ OI Wall 신뢰 불가(OI 소진)'
 
-            prompt = f"""당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 기반으로 분석하세요.
+            # 상위 OI 집중 행사가 추출
+            top_call_oi = cc_oi.nlargest(3,'openInterest')[['strike','openInterest']].to_string(index=False) if not cc_oi.empty else '없음'
+            top_put_oi  = pc_oi.nlargest(3,'openInterest')[['strike','openInterest']].to_string(index=False) if not pc_oi.empty else '없음'
+            # IV Smile 극값
+            iv_c_min = iv_c_smile.loc[iv_c_smile['impliedVolatility'].idxmin()].to_dict() if not iv_c_smile.empty else {}
+            iv_p_skew_note = f"Put IV 가장 높은 행사가: ${iv_p_smile.loc[iv_p_smile['impliedVolatility'].idxmax(),'strike']:,.0f} ({iv_p_smile['impliedVolatility'].max()*100:.0f}%)" if not iv_p_smile.empty else ''
 
-[분석 대상] {ticker_input}({name}) | {type_label} | 만기:{selected_expiry} | DTE:{dte_real}일 | 현재가:${current_price:,.2f}
-PCR 기준: Bearish>{bear_th} / Bullish<{bull_th}{data_quality_note}
+            prompt = f"""당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 종합하여 시장 심리를 심층 분석하세요.
 
-[수급]
-콜Vol:{cv:,.0f} / 풋Vol:{pv:,.0f} / 콜OI:{coi:,.0f} / 풋OI:{poi:,.0f}
-PCR(Vol):{pcr:.2f} / PCR(OI):{pcr_oi:.2f} / 다이버전스비율:{pcr/pcr_oi:.2f}배
+═══════════════════════════════════════
+[분석 대상]
+═══════════════════════════════════════
+종목: {ticker_input} ({name}) | 유형: {type_label}
+만기일: {selected_expiry} | DTE: {dte_real}일 | 현재가: ${current_price:,.2f}
+PCR 판단 기준: Bearish>{bear_th} / Bullish<{bull_th}{data_quality_note}
+Max Pain 계산 band: ±{get_mp_band(dte_real)*100:.0f}% (DTE 기반 동적 적용)
 
-[IV — OI가중+Trim/Vol가중+Trim (5%~300%)]
-Call: OI가중{iv_oi_c:.1f}% / Vol가중{iv_vol_c:.1f}%
-Put:  OI가중{iv_oi_p:.1f}% / Vol가중{iv_vol_p:.1f}%
-IV Skew(Put-Call): {iv_skew:+.1f}%p
-IV Expected Move(±1σ): ±{em_pct:.1f}% [{em_source}]
+═══════════════════════════════════════
+[수급 — Volume & Open Interest]
+═══════════════════════════════════════
+콜 거래량: {cv:,.0f} | 풋 거래량: {pv:,.0f}
+콜 OI: {coi:,.0f} | 풋 OI: {poi:,.0f}
+PCR(거래량기준): {pcr:.2f}
+PCR(OI기준): {pcr_oi:.2f}
+PCR 내부 다이버전스 비율: {pcr/pcr_oi if pcr_oi>0 else 0:.2f}배 (1.5↑=오늘풋급증/0.67↓=오늘콜급증)
+전체 콜/풋 OI 비율: {coi/(poi if poi>0 else 1):.2f} (1이상=콜 포지션 우세)
 
-[Max Pain & OI Wall — 현재가 ±40% 행사가 기준]
-Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / {oi_wall_note}
+═══════════════════════════════════════
+[내재변동성 IV — OI가중+Vol가중+Trim(5%~300%)]
+═══════════════════════════════════════
+Call IV: OI가중 {iv_oi_c:.1f}% / Vol가중 {iv_vol_c:.1f}% (차이:{iv_oi_c-iv_vol_c:+.1f}%p)
+Put IV:  OI가중 {iv_oi_p:.1f}% / Vol가중 {iv_vol_p:.1f}% (차이:{iv_oi_p-iv_vol_p:+.1f}%p)
+IV Skew (Put-Call, OI기준): {iv_skew:+.1f}%p → {'풋 공포 프리미엄 과다' if iv_skew>5 else ('콜 탐욕 프리미엄' if iv_skew<-3 else '균형')}
+Expected Move (±1σ, DTE={dte_real}일): ±{em_pct:.1f}% = ±${current_price*em_pct/100:.1f} [{em_source}]
+{iv_p_skew_note}
 
-[UOA — Mid-Price + 차등Spread필터]
+═══════════════════════════════════════
+[Max Pain & OI Wall]
+═══════════════════════════════════════
+Max Pain: ${mp:,.0f} (현재가 대비 {mp_gap:+.1f}% — {'하락 수렴 압력' if mp_gap<-2 else ('상승 수렴 압력' if mp_gap>2 else '횡보 압력')})
+{oi_wall_note}
+Call OI 상위 3 행사가:
+{top_call_oi}
+Put OI 상위 3 행사가:
+{top_put_oi}
+
+═══════════════════════════════════════
+[UOA — 스마트 머니 탐지 (Mid-Price + 차등Spread 필터)]
+═══════════════════════════════════════
 {uoa_str}
 
-[ΔOI — 전일 대비]
+═══════════════════════════════════════
+[ΔOI — 전일 대비 미결제약정 증감]
+═══════════════════════════════════════
 {doi_str}
 
-[분석 지시사항]
-1. {type_label} 구조적 PCR 특성 반영한 수급 해석
-2. PCR 다이버전스 비율이 의미하는 당일 편향
-3. IV Skew(OI가중 vs Vol가중 차이)가 나타내는 공포/탐욕
-4. DTE와 데이터 신뢰도를 감안하여 Max Pain 수렴 압력 해석
-5. ΔOI로 본 스마트 머니 진입/청산 흐름
-6. UOA의 OTM 비율로 방향성 추론
-7. 종합 단기 주가 방향 + 핵심 가격 레벨
-친절한 한글 마크다운으로 정리하세요."""
+═══════════════════════════════════════
+[심층 분석 지시사항]
+═══════════════════════════════════════
+1. 수급 종합: {type_label} 구조적 특성 반영, PCR(Vol) vs PCR(OI) 다이버전스 해석
+2. IV 분석: OI가중 vs Vol가중 차이, IV Skew의 공포/탐욕 의미, Expected Move 활용
+3. Max Pain 시나리오: DTE={dte_real}일 기준 만기일까지 주가 수렴 경로 예측
+4. OI Wall 지지/저항: 상위 3개 행사가별 Call/Put OI 집중도가 갖는 의미
+5. ΔOI 스마트 머니: Vol↑+ΔOI↑(신규진입) vs Vol↑+ΔOI↓(청산) 구분 분석
+6. UOA 분석: OTM/ATM/ITM 비율, Dollar Premium 규모, 방향성 추론
+7. 리스크 시나리오: Bull/Bear/Neutral 3가지 시나리오와 핵심 가격 레벨
+8. 데이터 신뢰도 감안: DTE={dte_real}일이므로 신뢰도 제한 사항 명시
+초보 투자자도 이해할 수 있도록 친절한 한글 마크다운으로 핵심만 명확히 정리하세요."""
 
     # ══════════════════════════════════════════════════════
     # 모드 2: 전체 기간 통합 분석
@@ -964,7 +1145,7 @@ Max Pain:${mp:,.2f}({mp_gap:+.1f}%) / {oi_wall_note}
                 ne=term_data[t]['nearest_exp']
                 if ne:
                     try:
-                        o2=ticker.option_chain(ne); mp_per_term[t]=calculate_max_pain(o2.calls,o2.puts,current_price,band=0.4)
+                        o2=ticker.option_chain(ne); mp_per_term[t]=calculate_max_pain(o2.calls,o2.puts,current_price,dte=term_data[t]["nearest_days"])
                     except: mp_per_term[t]=0
                 else: mp_per_term[t]=0
 
