@@ -286,11 +286,13 @@ with tab_analysis:
             coi= calls['openInterest'].sum(); poi= puts['openInterest'].sum()
             pcr= pv/cv if cv>0 else 0; pcr_oi= poi/coi if coi>0 else 0
             mp = calculate_max_pain(calls, puts)
-            mp_gap = (current_price-mp)/mp*100 if mp>0 else 0
+            # 기준점 = 현재가 / Max Pain이 현재가보다 낮으면 음수(하락 압력), 높으면 양수(상승 압력)
+            mp_gap = (mp - current_price) / current_price * 100 if current_price > 0 else 0
 
             pcr_color = "#ff4d6d" if pcr>1.2 else ("#00e5a0" if pcr<0.7 else "#f5a623")
             pcr_sub   = "Bearish ▼" if pcr>1.2 else ("Bullish ▲" if pcr<0.7 else "Neutral")
-            mp_gap_color = "#ff4d6d" if mp_gap>2 else ("#00e5a0" if mp_gap<-2 else "#9ca3af")
+            # mp_gap < 0 → Max Pain 아래 → 하락 압력(적색), mp_gap > 0 → 상승 압력(녹색)
+            mp_gap_color = "#ff4d6d" if mp_gap<-2 else ("#00e5a0" if mp_gap>2 else "#9ca3af")
 
             c1,c2,c3,c4 = st.columns(4)
             with c1: st.markdown(mc("CALL 거래량",f"{int(cv):,}","#00e5a0"), unsafe_allow_html=True)
@@ -337,11 +339,12 @@ with tab_analysis:
             st.markdown(sig(dc,"③ PCR 내부 다이버전스",dm), unsafe_allow_html=True)
 
             if mp>0:
-                mc_ = "signal-bear" if mp_gap>2 else ("signal-bull" if mp_gap<-2 else "signal-neut")
-                mb  = (f"현재가 ${current_price:,.2f}가 Max Pain ${mp:,.0f}보다 <strong>{abs(mp_gap):.1f}% 위</strong> → 만기일 하락 수렴 압력"
-                       if mp_gap>2 else
-                       (f"현재가 ${current_price:,.2f}가 Max Pain ${mp:,.0f}보다 <strong>{abs(mp_gap):.1f}% 아래</strong> → 만기일 상승 수렴 압력"
-                        if mp_gap<-2 else
+                # mp_gap = (mp - current) / current: 음수 → Max Pain 아래 → 하락압력
+                mc_ = "signal-bear" if mp_gap<-2 else ("signal-bull" if mp_gap>2 else "signal-neut")
+                mb  = (f"Max Pain ${mp:,.0f}이 현재가 ${current_price:,.2f} 대비 <strong>{mp_gap:.1f}%</strong> 아래 → 만기일 하락 수렴 압력"
+                       if mp_gap<-2 else
+                       (f"Max Pain ${mp:,.0f}이 현재가 ${current_price:,.2f} 대비 <strong>{mp_gap:+.1f}%</strong> 위 → 만기일 상승 수렴 압력"
+                        if mp_gap>2 else
                         f"현재가 ${current_price:,.2f} ≈ Max Pain ${mp:,.0f} → 만기일 횡보 압력 우세"))
                 st.markdown(sig(mc_,"④ Max Pain 수렴 신호",mb), unsafe_allow_html=True)
 
@@ -384,7 +387,7 @@ with tab_analysis:
 - PCR 내부 다이버전스: {pcr-pcr_oi:+.2f}
 
 [Max Pain & OI Wall]
-- Max Pain 가격: ${mp:,.2f} (현재가 대비 {mp_gap:+.1f}%)
+- Max Pain 가격: ${mp:,.2f} (현재가 대비 {mp_gap:+.1f}% — 음수=Max Pain이 아래=하락압력)
 - Gamma Wall(저항): ${gw_v:,.0f}
 - Put Wall(지지): ${pw_v:,.0f}
 
@@ -599,8 +602,8 @@ with tab_analysis:
             st.markdown("#### 🎯 기간별 Max Pain (최근접 만기 기준)")
             mp_cols = st.columns(3)
             for idx2, t2 in enumerate(TERMS):
-                mpv = mp_per_term[t2]; gap2 = (current_price-mpv)/mpv*100 if mpv>0 else 0
-                gc2 = "#ff4d6d" if gap2>2 else ("#00e5a0" if gap2<-2 else "#f5a623")
+                mpv = mp_per_term[t2]; gap2 = (mpv-current_price)/current_price*100 if current_price>0 else 0
+                gc2 = "#ff4d6d" if gap2<-2 else ("#00e5a0" if gap2>2 else "#f5a623")
                 with mp_cols[idx2]:
                     st.markdown(mc(f"Max Pain [{t2.split(' ')[0]}]",
                         f"${mpv:,.0f}" if mpv>0 else "N/A",gc2,
@@ -677,13 +680,13 @@ with tab_analysis:
             for t6 in TERMS:
                 mpv6 = mp_per_term[t6]
                 if mpv6>0 and current_price>0:
-                    gap6 = (current_price-mpv6)/mpv6*100
-                    mc6  = "signal-bear" if gap6>2 else ("signal-bull" if gap6<-2 else "signal-neut")
-                    mb6  = (f"현재가 ${current_price:,.2f}가 Max Pain ${mpv6:,.0f}보다 <strong>{abs(gap6):.1f}% 위</strong> → 하락 수렴 압력"
-                            if gap6>2 else
-                            (f"현재가 ${current_price:,.2f}가 Max Pain ${mpv6:,.0f}보다 <strong>{abs(gap6):.1f}% 아래</strong> → 상승 수렴 압력"
-                             if gap6<-2 else
-                             f"현재가 Max Pain ${mpv6:,.0f} 근처 → 횡보 압력"))
+                    gap6 = (mpv6-current_price)/current_price*100  # 음수=MP아래=하락압력
+                    mc6  = "signal-bear" if gap6<-2 else ("signal-bull" if gap6>2 else "signal-neut")
+                    mb6  = (f"Max Pain ${mpv6:,.0f}이 현재가 대비 <strong>{gap6:.1f}%</strong> 아래 → 하락 수렴 압력"
+                            if gap6<-2 else
+                            (f"Max Pain ${mpv6:,.0f}이 현재가 대비 <strong>{gap6:+.1f}%</strong> 위 → 상승 수렴 압력"
+                             if gap6>2 else
+                             f"Max Pain ${mpv6:,.0f} ≈ 현재가 → 횡보 압력"))
                     st.markdown(sig(mc6,f"⑥ Max Pain [{t6.split(' ')[0]}]",mb6), unsafe_allow_html=True)
 
             # ⑦ OI Wall
@@ -720,7 +723,7 @@ with tab_analysis:
             # ── AI 프롬프트 ──
             uoa_top_str = df_uoa[['term','side','strike','V_OI','days']].head(10).to_string(index=False) if not df_uoa.empty else "없음"
             iv_str = "\n".join([f"  {t.split(' ')[0]}: Call IV {df_terms.loc[t,'IV(Call) %']:.1f}% / Put IV {df_terms.loc[t,'IV(Put) %']:.1f}%" for t in TERMS])
-            mp_str = "\n".join([f"  {t.split(' ')[0]}: ${mp_per_term[t]:,.0f} (현재가 대비 {(current_price-mp_per_term[t])/mp_per_term[t]*100 if mp_per_term[t]>0 else 0:+.1f}%)" for t in TERMS])
+            mp_str = "\n".join([f"  {t.split(' ')[0]}: ${mp_per_term[t]:,.0f} (현재가 대비 {(mp_per_term[t]-current_price)/current_price*100 if current_price>0 else 0:+.1f}% — 음수=하락압력)" for t in TERMS])
 
             prompt = f"""
 당신은 월스트리트 시니어 파생상품 애널리스트입니다.
