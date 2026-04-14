@@ -82,13 +82,12 @@ def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
         tk = yf.Ticker(ticker_symbol)
         opt = tk.option_chain(exp_date)
         c, p = opt.calls.copy(), opt.puts.copy()
-        # 데이터가 있고, OI 컬럼이 존재하며, OI 총합이 0보다 큰지 검증
         if not c.empty and 'openInterest' in c.columns and c['openInterest'].sum() > 0:
             return c, p, "yfinance"
     except Exception:
         pass
 
-    # [2단계] yahooquery (yfinance 실패 시)
+    # [2단계] yahooquery
     try:
         from yahooquery import Ticker as yqTicker
         ytk = yqTicker(ticker_symbol)
@@ -105,7 +104,7 @@ def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
     except Exception:
         pass
 
-    # [3단계] Yahoo Raw JSON API 직접 우회 (가입/키 불필요)
+    # [3단계] Yahoo Raw JSON API 직접 우회
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         url_base = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
@@ -131,12 +130,10 @@ def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
     except Exception:
         pass
 
-    # 전부 실패 시 빈 데이터프레임 반환
     return pd.DataFrame(), pd.DataFrame(), "수집 실패"
 
-
 # ══════════════════════════════════════════════════════════
-# 분석 탭 — 기존 함수들 (오류 수정 포함)
+# 분석 탭 — 함수 정의
 # ══════════════════════════════════════════════════════════
 with tab_analysis:
 
@@ -273,7 +270,6 @@ with tab_analysis:
         else: return 0.40
 
     def calculate_max_pain(calls, puts, current_price: float = 0, dte: int = 60):
-        # [오류수정] OI가 0이라 삭제되는 문제 방지 (필터링 조건 완화)
         band = get_mp_band(dte)
         if current_price > 0:
             lo_mp, hi_mp = current_price * (1 - band), current_price * (1 + band)
@@ -352,22 +348,37 @@ with tab_analysis:
     has_api_key = api_key is not None
     if not has_api_key: st.sidebar.error('⚠️ API 키 없음')
 
+    # ══════════════════════════════════════════════════════
+    # 사이드바 설정 (오류 수정: 선언 순서 조정)
+    # ══════════════════════════════════════════════════════
     with st.sidebar:
         st.header('🔍 검색 설정')
         ticker_input = st.text_input('티커 심볼', value='AAPL').upper()
+        
+        # [수정] analysis_mode 변수 정의를 위쪽으로 배치하여 NameError 완벽 방지
         analysis_mode = st.radio('분석 모드', ['단일 만기일 분석', '전체 기간 통합 분석 (단/중/장기)'])
+        
         ticker = yf.Ticker(ticker_input)
+        expirations = []
         try:
             expirations = ticker.options
             if not expirations: st.error('옵션 데이터 없음')
-        except: st.error('서버 연결 오류')
+        except: 
+            st.error('서버 연결 오류')
 
-        selected_expiry = st.selectbox('만기일 선택', expirations) if expirations and analysis_mode == '단일 만기일 분석' else None
+        # [수정] 조건문을 명확하고 안전하게 구성
+        selected_expiry = None
+        if expirations and analysis_mode == '단일 만기일 분석':
+            selected_expiry = st.selectbox('만기일 선택', expirations)
 
         st.markdown('---')
         st.markdown('**💾 ΔOI 데이터베이스**')
         if os.path.exists(DB_PATH):
-            try: st.success(f"로컬 DB 활성 · {sqlite3.connect(DB_PATH).execute('SELECT COUNT(DISTINCT snap_date||ticker) FROM oi_snap').fetchone()[0]}개 스냅샷")
+            try: 
+                conn = _get_db_conn()
+                cnt = conn.execute('SELECT COUNT(DISTINCT snap_date||ticker) FROM oi_snap').fetchone()[0]
+                conn.close()
+                st.success(f"로컬 DB 활성 · {cnt}개 스냅샷")
             except: pass
 
     current_price = 0; name = ticker_input; ticker_type = 'EQUITY'
@@ -390,7 +401,6 @@ with tab_analysis:
     if analysis_mode == '단일 만기일 분석' and selected_expiry:
         with st.spinner(f"데이터 수집 중... (다중 복구 엔진 동작)"):
             
-            # [복구엔진 적용] yfinance 파서 오류 시 다중화 통로로 수집
             calls, puts, src_msg = fetch_options_chain_robust(ticker_input, selected_expiry)
             if src_msg != "yfinance" and src_msg != "수집 실패":
                 st.toast(f"✅ yfinance 파서 오류 감지. 우회망({src_msg})으로 데이터를 성공적으로 복구했습니다.", icon="🛡️")
@@ -437,7 +447,6 @@ with tab_analysis:
             with row1[2]: st.markdown(mc('PCR (Volume)', f'{pcr:.2f}', '#f3f4f6', '', pcr_color), unsafe_allow_html=True)
             with row1[3]: st.markdown(mc('Max Pain', f'${mp:,.0f}' if mp>0 else 'N/A', '#fb923c', f'({mp_gap:+.1f}%)', mp_gap_color), unsafe_allow_html=True)
 
-            # ── [오류수정] OI가 비어있어도 그래프 X축은 그리기 ──
             cc['openInterest'] = cc['openInterest'].fillna(0).round().astype(int)
             pc['openInterest'] = pc['openInterest'].fillna(0).round().astype(int)
 
@@ -446,7 +455,6 @@ with tab_analysis:
             x_hi = min(all_strikes.max() + 2.5, hi + 2.5) if not all_strikes.empty else hi
             xaxis_cfg = dict(range=[x_lo, x_hi])
 
-            # 거래량 차트
             fig = go.Figure()
             fig.add_trace(go.Bar(x=cc['strike'], y=cc['volume'], name='Call Vol', marker_color='#00e5a0'))
             fig.add_trace(go.Bar(x=pc['strike'], y=-pc['volume'], name='Put Vol', marker_color='#ff4d6d'))
@@ -456,7 +464,6 @@ with tab_analysis:
             fig.update_layout(title=f'① 행사가별 거래량 (데이터 소스: {src_msg})', barmode='relative', template='plotly_dark', height=400, xaxis=xaxis_cfg)
             st.plotly_chart(fig, use_container_width=True)
 
-            # OI 차트
             if cc['openInterest'].sum() == 0 and pc['openInterest'].sum() == 0:
                 st.error("🚨 **API 한계:** 장 시작 전이거나 얇은 유동성으로 인해 해당 만기일의 미결제약정(OI)이 모두 비어 있습니다. 그래프 표기가 불가능합니다.")
                 oi_wall_reliable = False
@@ -468,7 +475,6 @@ with tab_analysis:
             fig_oi.update_layout(title='② 행사가별 미결제약정 (OI Wall)', barmode='relative', template='plotly_dark', height=400, xaxis=xaxis_cfg)
             st.plotly_chart(fig_oi, use_container_width=True)
 
-            # 이하 분석 패널 생략 없이 기존과 동일하게 표기 (코드 길이 축약을 위해 UI 컴포넌트 호출)
             st.markdown("### 🧠 옵션 이론 신호 분석")
             s1,m1_ = pcr_label(pcr, bear_th, bull_th)
             st.markdown(sig(s1,f'① PCR(Volume) [{type_label}기준 >{bear_th}/{bull_th}]',m1_), unsafe_allow_html=True)
@@ -482,15 +488,13 @@ with tab_analysis:
                 st.markdown(sig("signal-bull","⑧ UOA 스마트 머니 동향",f"스프레드 필터 통과 {len(uoa_all)}건 탐지됨"), unsafe_allow_html=True)
                 st.dataframe(uoa_all[['side','moneyness','strike','mid_price','dollar_premium']], use_container_width=True)
 
-            # 프롬프트
             prompt = f"""당신은 파생상품 애널리스트입니다. {ticker_input}의 옵션 데이터를 분석하세요. (소스: {src_msg})\nPCR:{pcr:.2f} / MaxPain:${mp} / Call IV:{iv_vol_c:.1f}%"""
 
     # ══════════════════════════════════════════════════════
-    # 모드 2: 전체 기간 분석 (여기도 동일하게 fetch_options_chain_robust 적용)
+    # 모드 2: 전체 기간 분석
     # ══════════════════════════════════════════════════════
     elif analysis_mode == '전체 기간 통합 분석 (단/중/장기)' and expirations:
         with st.spinner('전체 만기일 데이터 수집 중... (3중 엔진 가동)'):
-            # ...기존 초기화 코드...
             TERMS = ['Short (단기/30일내)', 'Mid (중기/30~90일)', 'Long (장기/90일이상)']
             term_data = {t: dict(call_vol=0,put_vol=0,call_oi=0,put_oi=0,nearest_days=9999,nearest_exp=None) for t in TERMS}
             
@@ -503,7 +507,6 @@ with tab_analysis:
                     cat = TERMS[0] if days<=30 else TERMS[1] if days<=90 else TERMS[2]
                     td = term_data[cat]
 
-                    # [복구엔진 적용]
                     c, p, src_msg = fetch_options_chain_robust(ticker_input, exp_date)
                     if src_msg != "yfinance": fallback_count += 1
                     
@@ -526,8 +529,41 @@ with tab_analysis:
             df_terms = pd.DataFrame(term_data).T
             st.dataframe(df_terms[['call_vol','put_vol']], use_container_width=True)
 
-    # 공통 AI 브리핑 버튼...
-    if ticker_input and expirations:
+    # ══════════════════════════════════════════════════════
+    # 공통 AI 브리핑 버튼
+    # ══════════════════════════════════════════════════════
+    if ticker_input and expirations and ((analysis_mode == '단일 만기일 분석' and selected_expiry) or analysis_mode != '단일 만기일 분석'):
         st.divider()
-        if st.button("✨ 옵션 시장 브리핑 요약"):
-            st.info("프롬프트 복사 후 Gemini에 붙여넣으세요.")
+        st.subheader('🤖 Gemini AI 옵션 시장 브리핑')
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('#### 옵션 1. 스트림릿에서 바로 분석')
+            if st.button('✨ API 자동 분석 실행', type='primary', use_container_width=True):
+                if has_api_key:
+                    with st.spinner('AI 분석 중...'):
+                        try:
+                            result, used = generate_with_fallback(prompt, api_key)
+                            st.success(f'완료 (모델: {used})')
+                            st.markdown(f'<div class="report-box">{result}</div>', unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f'오류: {e}')
+                else:
+                    st.error('API 키 없음')
+        with col2:
+            st.markdown('#### 옵션 2. Gemini 웹에서 분석')
+            safe_prompt = json.dumps(prompt)
+            components.html(f"""
+            <button onclick="copyAndOpen()" style="background:#f5a623;color:#000;padding:12px 20px;
+                border:none;border-radius:8px;font-weight:bold;font-size:15px;cursor:pointer;
+                width:100%;box-shadow:0 4px 6px rgba(0,0,0,.1);">
+                📋 프롬프트 복사 & Gemini 웹 열기
+            </button>
+            <script>
+            function copyAndOpen(){{
+                const t={safe_prompt};
+                navigator.clipboard.writeText(t).then(()=>window.open('https://gemini.google.com/','_blank'))
+                .catch(()=>{{const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();window.open('https://gemini.google.com/','_blank');}});
+            }}
+            </script>""", height=60)
+        with st.expander('생성된 프롬프트 확인', expanded=False):
+            st.code(prompt, language='text')
