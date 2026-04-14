@@ -53,41 +53,64 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="big-font">OPTIONS FLOW</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">실시간 옵션 분석 v3.1 — 3중 데이터 페일오버(Fail-over) 자동 복구 엔진 탑재</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">실시간 옵션 분석 v3.2 — 전면 3중 페일오버(Fail-over) 자동 복구 엔진 탑재</p>', unsafe_allow_html=True)
 
 tab_analysis, tab_help = st.tabs(["📊 분석", "📖 도움말"])
 
-# ══════════════════════════════════════════════════════════
-# 도움말 탭
-# ══════════════════════════════════════════════════════════
 with tab_help:
-    st.markdown("## 📖 3중 데이터 자동 복구 엔진 가이드 (v3.1)")
-    st.markdown("이 앱은 yfinance의 고질적인 데이터 누락(NaN) 문제를 해결하기 위해 **가입 필요없는 3단계 우회망**을 가동합니다.")
-    st.markdown("""
-    * **1단계 (yfinance):** 기본 호출. 성공하면 즉시 분석.
-    * **2단계 (yahooquery):** yfinance 파서 오류 시 라이브러리를 동적으로 전환하여 구조가 다른 JSON에서 데이터를 구출합니다.
-    * **3단계 (Raw JSON 우회):** 2단계까지 실패 시 파이썬 라이브러리를 버리고, 브라우저를 위장하여 야후 파이낸스 백엔드 서버(query2.finance.yahoo.com)에서 직접 원시 데이터를 크롤링합니다.
-    """)
+    st.markdown("## 📖 3중 데이터 자동 복구 엔진 가이드 (v3.2)")
+    st.markdown("yfinance 접속 차단 방어를 위해, 만기일 조회부터 데이터 추출까지 모든 과정에 우회망이 적용되었습니다.")
 
 # ══════════════════════════════════════════════════════════
-# 3중 다중화 옵션 데이터 수집 함수 (Fallback Engine)
+# 강력한 데이터 수집기 (만기일 + 옵션 체인)
 # ══════════════════════════════════════════════════════════
 @st.cache_data(ttl=300, show_spinner=False)
+def get_expirations_robust(ticker_symbol: str):
+    """만기일(Expirations) 수집 전용 3중 우회 함수"""
+    # 1. Raw API (가장 빠르고 확실함)
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            timestamps = data.get('optionChain', {}).get('result', [{}])[0].get('expirationDates', [])
+            if timestamps:
+                return [datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d') for ts in timestamps]
+    except: pass
+
+    # 2. yfinance
+    try:
+        tk = yf.Ticker(ticker_symbol)
+        exps = tk.options
+        if exps: return list(exps)
+    except: pass
+
+    # 3. yahooquery
+    try:
+        from yahooquery import Ticker as yqTicker
+        ytk = yqTicker(ticker_symbol)
+        chain = ytk.option_chain
+        if chain is not None and not chain.empty:
+            df = chain.reset_index()
+            return sorted(df['expiration'].astype(str).str[:10].unique().tolist())
+    except: pass
+
+    return []
+
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
-    """
-    미결제약정(OI) 누락을 방어하는 3중 페일오버 데이터 수집기
-    """
-    # [1단계] yfinance
+    """옵션 체인 데이터 수집 3중 우회 함수"""
+    # 1. yfinance
     try:
         tk = yf.Ticker(ticker_symbol)
         opt = tk.option_chain(exp_date)
         c, p = opt.calls.copy(), opt.puts.copy()
         if not c.empty and 'openInterest' in c.columns and c['openInterest'].sum() > 0:
             return c, p, "yfinance"
-    except Exception:
-        pass
+    except: pass
 
-    # [2단계] yahooquery
+    # 2. yahooquery
     try:
         from yahooquery import Ticker as yqTicker
         ytk = yqTicker(ticker_symbol)
@@ -100,13 +123,12 @@ def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
                 c = df_exp[df_exp['optionType'] == 'calls'].copy()
                 p = df_exp[df_exp['optionType'] == 'puts'].copy()
                 if not c.empty and c.get('openInterest', pd.Series([0])).sum() > 0:
-                    return c, p, "yahooquery (우회 성공)"
-    except Exception:
-        pass
+                    return c, p, "yahooquery"
+    except: pass
 
-    # [3단계] Yahoo Raw JSON API 직접 우회
+    # 3. Raw JSON 직접 우회
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         url_base = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker_symbol}"
         res = requests.get(url_base, headers=headers, timeout=5)
         data = res.json()
@@ -126,9 +148,8 @@ def fetch_options_chain_robust(ticker_symbol: str, exp_date: str):
             c = pd.DataFrame(opt_data.get('calls', []))
             p = pd.DataFrame(opt_data.get('puts', []))
             if not c.empty and 'openInterest' in c.columns:
-                return c, p, "Raw API (심층 복구 성공)"
-    except Exception:
-        pass
+                return c, p, "Raw API"
+    except: pass
 
     return pd.DataFrame(), pd.DataFrame(), "수집 실패"
 
@@ -292,12 +313,6 @@ with tab_analysis:
             pain[s] = cp + pp
         return min(pain, key=pain.get) if pain else 0.0
 
-    def detect_ticker_type(info):
-        qt = info.get('quoteType','').upper()
-        if qt == 'ETF': return 'ETF'
-        if qt in ('INDEX','MUTUALFUND'): return 'INDEX'
-        return 'EQUITY'
-
     def get_pcr_thresholds(tt):
         if tt == 'ETF': return 1.5, 1.0
         if tt == 'INDEX': return 1.3, 0.85
@@ -344,29 +359,25 @@ with tab_analysis:
             except: time.sleep(0.5)
         raise Exception('모든 모델 실패')
 
+    # ══════════════════════════════════════════════════════
+    # 사이드바 설정 
+    # ══════════════════════════════════════════════════════
     api_key = st.secrets.get('GEMINI_API_KEY')
     has_api_key = api_key is not None
     if not has_api_key: st.sidebar.error('⚠️ API 키 없음')
 
-    # ══════════════════════════════════════════════════════
-    # 사이드바 설정 (오류 수정: 선언 순서 조정)
-    # ══════════════════════════════════════════════════════
     with st.sidebar:
         st.header('🔍 검색 설정')
         ticker_input = st.text_input('티커 심볼', value='AAPL').upper()
         
-        # [수정] analysis_mode 변수 정의를 위쪽으로 배치하여 NameError 완벽 방지
+        # [NameError 방지] 모드를 먼저 선언
         analysis_mode = st.radio('분석 모드', ['단일 만기일 분석', '전체 기간 통합 분석 (단/중/장기)'])
         
-        ticker = yf.Ticker(ticker_input)
-        expirations = []
-        try:
-            expirations = ticker.options
-            if not expirations: st.error('옵션 데이터 없음')
-        except: 
-            st.error('서버 연결 오류')
+        # [오류 해결] 만기일 리스트도 3중 엔진으로 로드
+        expirations = get_expirations_robust(ticker_input)
+        if not expirations:
+            st.error('해당 종목의 옵션 데이터를 찾을 수 없습니다.')
 
-        # [수정] 조건문을 명확하고 안전하게 구성
         selected_expiry = None
         if expirations and analysis_mode == '단일 만기일 분석':
             selected_expiry = st.selectbox('만기일 선택', expirations)
@@ -381,14 +392,28 @@ with tab_analysis:
                 st.success(f"로컬 DB 활성 · {cnt}개 스냅샷")
             except: pass
 
+    # 종목 정보 및 현재가 역시 이중화(Fallback) 처리
     current_price = 0; name = ticker_input; ticker_type = 'EQUITY'
     if ticker_input and expirations:
         try:
+            ticker = yf.Ticker(ticker_input)
+            hist = ticker.history(period='1d')
+            if not hist.empty: current_price = hist['Close'].iloc[-1]
             info = ticker.info
-            current_price = info.get('currentPrice') or info.get('regularMarketPrice') or ticker.history(period='1d')['Close'].iloc[-1]
-            name = info.get('longName', ticker_input)
-            ticker_type = detect_ticker_type(info)
+            name = info.get('longName', ticker_input) if info else ticker_input
+            qt = info.get('quoteType', 'EQUITY').upper() if info else 'EQUITY'
+            ticker_type = 'ETF' if qt == 'ETF' else ('INDEX' if qt in ('INDEX','MUTUALFUND') else 'EQUITY')
         except: pass
+        
+        # yfinance 실패 시 yahooquery로 현재가 긁어오기
+        if current_price == 0:
+            try:
+                from yahooquery import Ticker as yqTicker
+                price_data = yqTicker(ticker_input).price
+                if type(price_data) is dict and ticker_input in price_data:
+                    current_price = price_data[ticker_input].get('regularMarketPrice', 0)
+                    name = price_data[ticker_input].get('shortName', ticker_input)
+            except: pass
 
         bear_th, bull_th = get_pcr_thresholds(ticker_type)
         type_label = {'ETF':'ETF','INDEX':'INDEX','EQUITY':'개별주'}.get(ticker_type,'개별주')
