@@ -257,21 +257,61 @@ def format_flow_display(df):
 
 
 # ── Max Pain 계산 ─────────────────────────────────────────────────────────────
-def calc_max_pain(calls, puts):
+# [버그 원인]
+#   기존 코드는 ALL 행사가(원거리 포함)의 OI를 그대로 사용.
+#   yfinance는 0DTE 당일에도 전일(T-1) 기준 OI를 반환하는데,
+#   일부 조건에서 ATM 근처는 OI=0이지만, 현재가와 동떨어진 원거리 행사가
+#   (예: NVDA $340 콜)에 전일 잔존 OI가 남아 있을 수 있음.
+#   → 이 원거리 OI가 Pain 계산을 지배 → Max Pain이 현재가와 동떨어진 값으로 출력.
+#
+# [수정 내용]
+#   1. current_price ±PRICE_RANGE(기본 40%) 이내 행사가만 사용 (원거리 이상치 제거)
+#   2. 필터 후에도 OI=0이면 None 반환
+#   3. 계산 결과가 현재가 ±40% 벗어나면 "비정상 결과"로 None 반환
+#      (데이터 오염이 필터를 통과한 edge case 방어)
+# -----------------------------------------------------------------------------
+def calc_max_pain(calls, puts, current_price=0.0, price_range=0.40):
+    """
+    반환: (max_pain_strike, reason_str)
+      - (float, None)   : 정상 산출
+      - (None, str)     : 산출 불가 사유 포함
+    """
     try:
-        if calls['openInterest'].sum() + puts['openInterest'].sum() == 0:
-            return None  # OI 미산출 (0DTE T+1 문제)
-        strikes = sorted(set(calls['strike'].tolist() + puts['strike'].tolist()))
+        c = calls.copy()
+        p = puts.copy()
+
+        # ① 현재가 기준 ±40% 범위로 행사가 필터 (원거리 이상치 OI 제거)
+        if current_price > 0:
+            lo = current_price * (1 - price_range)
+            hi = current_price * (1 + price_range)
+            c  = c[(c['strike'] >= lo) & (c['strike'] <= hi)]
+            p  = p[(p['strike'] >= lo) & (p['strike'] <= hi)]
+
+        oi_total = float(c['openInterest'].sum() + p['openInterest'].sum())
+        if oi_total == 0:
+            return None, "OI 미산출 (0DTE T+1 규정)"
+
+        strikes = sorted(set(c['strike'].tolist() + p['strike'].tolist()))
         if not strikes:
-            return None
+            return None, "유효 행사가 없음"
+
         pain = []
         for s in strikes:
-            cp = float(((calls['strike'] - s).clip(lower=0) * calls['openInterest']).sum())
-            pp = float(((s - puts['strike']).clip(lower=0) * puts['openInterest']).sum())
+            cp = float(((c['strike'] - s).clip(lower=0) * c['openInterest']).sum())
+            pp = float(((s - p['strike']).clip(lower=0) * p['openInterest']).sum())
             pain.append(cp + pp)
-        return strikes[pain.index(min(pain))]
-    except Exception:
-        return None
+
+        result = strikes[pain.index(min(pain))]
+
+        # ② 결과 유효성 검증: 현재가 ±40% 벗어나면 데이터 오염으로 간주
+        if current_price > 0:
+            if result > current_price * 1.40 or result < current_price * 0.60:
+                return None, f"결과값(${result:.0f})이 현재가 대비 ±40% 초과 → 데이터 오염 의심"
+
+        return result, None   # (정상값, 사유없음)
+
+    except Exception as e:
+        return None, f"계산 오류: {str(e)[:60]}"
 
 
 # ── 상위 거래량 행사가 ────────────────────────────────────────────────────────
@@ -424,7 +464,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
 
     call_iv, call_iv_n, call_liq = get_volume_weighted_iv(calls, is_near_expiry=is_near)
     put_iv,  put_iv_n,  put_liq  = get_volume_weighted_iv(puts,  is_near_expiry=is_near)
-    max_pain  = calc_max_pain(calls, puts)
+    max_pain, mp_reason = calc_max_pain(calls, puts, current_price=current_price)
     top_calls = get_top_strikes(calls, n=5)
     top_puts  = get_top_strikes(puts,  n=5)
 
@@ -448,22 +488,45 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
                                 "#f3f4f6", sig_text, sig_color),
                     unsafe_allow_html=True)
     with c4:
-        oi_val = f"{pcr_oi:.2f}" if (call_oi + put_oi) > 0 else "미산출(0DTE)"
-        oi_col = "#9ca3af" if (call_oi + put_oi) > 0 else "#f5a623"
+        # OI 신뢰도 평가: OI 총량이 거래량의 1% 미만이면 낮음으로 표시
+        oi_total = call_oi + put_oi
+        vol_total = call_vol + put_vol
+        oi_reliability = (oi_total / vol_total) if vol_total > 0 else 0
+        if oi_total == 0:
+            oi_val, oi_col = "미산출(0DTE)", "#f5a623"
+        elif oi_reliability < 0.01:
+            oi_val, oi_col = f"{pcr_oi:.2f} ⚠️낮음", "#f5a623"
+        else:
+            oi_val, oi_col = f"{pcr_oi:.2f}", "#9ca3af"
         st.markdown(metric_card("PCR (OI) ⚠️전일", oi_val, oi_col),
                     unsafe_allow_html=True)
     with c5:
-        mp_val = f"${max_pain:,.0f}" if max_pain else "미산출"
-        mp_col = "#a855f7" if max_pain else "#f5a623"
+        if max_pain:
+            mp_val, mp_col = f"${max_pain:,.0f}", "#a855f7"
+        else:
+            # 사유 축약 표시
+            mp_short = "미산출" if not mp_reason else (
+                "0DTE미산출" if "T+1" in mp_reason else
+                "데이터오염" if "오염" in mp_reason else "미산출"
+            )
+            mp_val, mp_col = mp_short, "#f5a623"
         st.markdown(metric_card("Max Pain", mp_val, mp_col),
                     unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    warn_box(
-        "⚠️ <b>OI(미결제약정)는 전일 장 마감 기준</b>입니다. "
-        "장중 Volume과 직접 비교하면 오류가 발생합니다. "
-        "장중에는 <b>PCR(거래량)</b> 위주로 참고하세요."
-    )
+    if oi_reliability < 0.01 and oi_total > 0:
+        warn_box(
+            "⚠️ <b>OI 신뢰도 낮음:</b> 전체 OI가 당일 거래량의 1% 미만입니다. "
+            "소수의 원거리 행사가에 잔존 OI가 있을 가능성이 높습니다. "
+            "PCR(OI)와 Max Pain은 참고용으로만 사용하세요. "
+            "장중에는 <b>PCR(거래량)과 거래량 집중 행사가</b>를 우선 참고하세요."
+        )
+    else:
+        warn_box(
+            "⚠️ <b>OI(미결제약정)는 전일 장 마감 기준</b>입니다. "
+            "장중 Volume과 직접 비교하면 오류가 발생합니다. "
+            "장중에는 <b>PCR(거래량)</b> 위주로 참고하세요."
+        )
 
     # ── IV 가중 평균 ─────────────────────────────────────────────────────
     iv_col1, iv_col2 = st.columns(2)
@@ -484,8 +547,10 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
 
     if is_near:
         info_box(
-            "ℹ️ <b>근만기 IV:</b> bid=0이어도 ask>0 & lastPrice>0이면 계산에 포함합니다. "
-            "만기 당일 OTM 옵션은 yfinance가 IV=0 반환하는 경우 자동 제외됩니다."
+            "ℹ️ <b>근만기 IV 신뢰도 주의:</b> bid=0이어도 ask>0 & lastPrice>0이면 계산에 포함합니다. "
+            "단, 0DTE 옵션은 잔존 시간가치(T→0)로 인해 Black-Scholes 기반 yfinance IV 계산이 "
+            "불안정합니다. 표시된 IV값(예: 8~15%)은 과소 추정일 가능성이 있으므로 "
+            "절대값보다 <b>콜/풋 IV 간 상대적 차이(Put IV > Call IV → 하방 헤징 심리)</b>를 참고하세요."
         )
     else:
         info_box(
@@ -649,10 +714,15 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
         flow_buy_text  = flow_txt(all_flow, 'BUY')
         flow_sell_text = flow_txt(all_flow, 'SELL')
     else:
-        msg = ("근만기임에도 방향성 추론 데이터가 없습니다. "
-               "yfinance 데이터 지연이거나 이미 만기가 지난 상태일 수 있습니다.") if is_near else \
-              "방향성 추론 가능한 옵션이 없습니다. (거래량 < 100 이거나 Bid/Ask 데이터 부재)"
-        st.info(msg)
+        if is_near:
+            warn_box(
+                "⚠️ <b>0DTE Smart Money 데이터 없음 — 원인:</b> yfinance는 무료 EOD 데이터이므로 "
+                "장중 실시간 Bid/Ask를 제공하지 않습니다. 0DTE 옵션의 경우 "
+                "Bid=0, Ask=0으로 반환되는 경우가 많아 방향성 추론이 불가합니다.<br>"
+                "→ <b>대안:</b> 위 '거래량 집중 행사가' 차트를 지지/저항선 판단에 활용하세요."
+            )
+        else:
+            st.info("방향성 추론 가능한 옵션이 없습니다. (거래량 < 100 이거나 Bid/Ask 데이터 부재)")
 
     # ── 프롬프트 생성 (데이터 풍부화) ─────────────────────────────────────
     if call_iv and put_iv:
@@ -663,8 +733,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
             f"풋 IV: {'산출불가' if not put_iv else f'{put_iv:.1f}%'}"
             + ("  ← 근만기 특성상 yfinance IV 미산출 (거래량 차트 기준으로 분석할 것)" if is_near else "  ← IV 데이터 부족")
         )
-    mp_line = (f"${max_pain:,.0f}" if max_pain else
-               ("0~2DTE → OI T+1 규정으로 미산출" if is_near else "OI 부족으로 계산 불가"))
+    mp_line = f"${max_pain:,.0f}" if max_pain else f"미산출 ({mp_reason})"
 
     prompt = f"""
 당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 분석하세요.
