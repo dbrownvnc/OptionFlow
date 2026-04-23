@@ -403,14 +403,22 @@ with st.sidebar:
 
 
 # =============================================================================
-# ④ 현재가 수집
+# ④ 현재가 수집 (장 상태 감지 + 장외 가격 포함)
 # =============================================================================
-current_price = 0.0
-name          = ticker_input
+current_price  = 0.0   # 옵션 계산용 기준가 (정규장 우선)
+display_price  = 0.0   # 화면 표시용 (장외 있으면 장외가)
+name           = ticker_input
+market_state   = "UNKNOWN"   # REGULAR / PRE / POST / CLOSED
+ext_price      = 0.0         # 장외 가격
+ext_change_pct = 0.0         # 장외 등락률
+ext_label      = ""          # "장전" / "장후"
 
 if ticker_input and expirations:
     try:
-        info          = ticker.info or {}
+        info = ticker.info or {}
+        name = info.get('longName', ticker_input)
+
+        # ① 정규장 기준가 (옵션 행사가 비교용으로 항상 사용)
         current_price = safe_float(
             info.get('currentPrice') or info.get('regularMarketPrice')
         )
@@ -418,11 +426,70 @@ if ticker_input and expirations:
             hist = ticker.history(period="2d")
             if not hist.empty:
                 current_price = safe_float(hist['Close'].iloc[-1])
-        name = info.get('longName', ticker_input)
+
+        # ② 장 상태 감지
+        market_state = info.get('marketState', 'UNKNOWN').upper()
+        # marketState 값 예시: REGULAR, PRE, PREPRE, POST, POSTPOST, CLOSED
+
+        # ③ 장외 가격 수집
+        if market_state in ('POST', 'POSTPOST'):
+            ext_price      = safe_float(info.get('postMarketPrice', 0))
+            ext_change_pct = safe_float(info.get('postMarketChangePercent', 0))
+            ext_label      = "장후(AH)"
+        elif market_state in ('PRE', 'PREPRE'):
+            ext_price      = safe_float(info.get('preMarketPrice', 0))
+            ext_change_pct = safe_float(info.get('preMarketChangePercent', 0))
+            ext_label      = "장전(PM)"
+
+        # ④ 표시용 가격: 장외 있으면 장외가, 없으면 정규장가
+        display_price = ext_price if ext_price > 0 else current_price
+
     except Exception as e:
         st.warning(f"현재가 조회 실패: {str(e)[:100]}")
 
-    st.subheader(f"📊 {name} ({ticker_input}) | 현재가: ${current_price:,.2f}")
+    # ── 가격 헤더 표시 ──────────────────────────────────────────────────────
+    if ext_price > 0:
+        # 장외 등락 방향 색상
+        ext_color = "#00e5a0" if ext_change_pct >= 0 else "#ff4d6d"
+        ext_sign  = "▲" if ext_change_pct >= 0 else "▼"
+        ext_delta = abs(ext_change_pct * 100) if abs(ext_change_pct) < 1 else abs(ext_change_pct)
+        # yfinance는 소수(0.012 = 1.2%)로 주는 경우와 퍼센트(1.2)로 주는 경우 혼재
+        # → 절대값 1 미만이면 소수형으로 간주해 ×100
+        ext_pct_str = f"{ext_delta:.2f}%"
+
+        st.markdown(
+            f"<div style='display:flex;align-items:baseline;gap:16px;margin-bottom:8px;'>"
+            f"<span style='font-size:20px;font-weight:700;color:#f3f4f6;'>"
+            f"📊 {name} ({ticker_input})</span>"
+            f"<span style='font-size:15px;color:#9ca3af;'>정규장 종가</span>"
+            f"<span style='font-size:22px;font-weight:800;color:#f3f4f6;'>${current_price:,.2f}</span>"
+            f"<span style='font-size:13px;background:#1f2937;padding:3px 10px;"
+            f"border-radius:12px;color:#a855f7;font-weight:700;'>{ext_label}</span>"
+            f"<span style='font-size:22px;font-weight:800;color:{ext_color};'>${ext_price:,.2f}</span>"
+            f"<span style='font-size:14px;color:{ext_color};font-weight:700;'>"
+            f"{ext_sign} {ext_pct_str}</span>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+        info_box(
+            f"ℹ️ <b>{ext_label} 가격 표시 중</b> (marketState: {market_state}). "
+            f"옵션 행사가 비교·Max Pain 계산은 <b>정규장 종가 ${current_price:,.2f}</b> 기준으로 유지됩니다. "
+            f"장외 가격은 유동성이 낮아 옵션 분석의 기준가로 적합하지 않습니다."
+        )
+    else:
+        # 정규장 중 또는 장외 데이터 없음
+        state_label = {
+            "REGULAR": "🟢 정규장",
+            "PRE":     "🟡 장전",
+            "PREPRE":  "🟡 장전",
+            "POST":    "🟠 장후",
+            "POSTPOST":"🟠 장후",
+            "CLOSED":  "⚫ 장외시간",
+        }.get(market_state, f"⚪ {market_state}")
+
+        st.subheader(
+            f"📊 {name} ({ticker_input})  |  {state_label}  |  ${current_price:,.2f}"
+        )
 
 
 # =============================================================================
