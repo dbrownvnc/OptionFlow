@@ -315,10 +315,15 @@ def calc_max_pain(calls, puts, current_price=0.0, is_near_expiry=False):
         if not strikes:
             return None, "유효 행사가 없음"
 
+        # [CRITICAL: 공식 정확성]
+        # Max Pain = 옵션 매도자의 총 손실을 최소화하는 주가 S
+        #   콜 옵션 ITM 조건: S > K → 페이아웃 = max(S - K, 0)
+        #   풋 옵션 ITM 조건: K > S → 페이아웃 = max(K - S, 0)
+        # ※ 이전 버전에 콜/풋 공식이 반대로 되어 있어 결과가 잘못 출력되던 버그 수정.
         pain = []
         for s in strikes:
-            cp = float(((c['strike'] - s).clip(lower=0) * c['openInterest']).sum())
-            pp = float(((s - p['strike']).clip(lower=0) * p['openInterest']).sum())
+            cp = float(((s - c['strike']).clip(lower=0) * c['openInterest']).sum())  # max(S - K_call, 0)
+            pp = float(((p['strike'] - s).clip(lower=0) * p['openInterest']).sum())  # max(K_put - S, 0)
             pain.append(cp + pp)
 
         result = strikes[pain.index(min(pain))]
