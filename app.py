@@ -126,7 +126,7 @@ def infer_direction(row):
     except Exception:
         return 'ILLIQUID', '⚫'
 
-# ── 프리미엄 계산 ─────────────────────────────────────────────────────────────
+# ── 프리미 계산 ─────────────────────────────────────────────────────────────
 def calc_mid_premium(row):
     try:
         bid  = safe_float(row.get('bid',  0))
@@ -453,7 +453,6 @@ if ticker_input and expirations:
         ext_delta = abs(ext_change_pct * 100) if abs(ext_change_pct) < 1 else abs(ext_change_pct)
         ext_pct_str = f"{ext_delta:.2f}%"
 
-        # [수정] 강제 흰색 지정(color:#f3f4f6) 제거하여 라이트모드/다크모드 호환성 개선
         st.markdown(
             f"<div style='display:flex;align-items:baseline;gap:16px;margin-bottom:8px;'>"
             f"<span style='font-size:20px;font-weight:700;'>📊 {name} ({ticker_input})</span>"
@@ -544,7 +543,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
                     unsafe_allow_html=True)
     with c3:
         st.markdown(metric_card("PCR (거래량)", f"{pcr_vol:.2f}",
-                                "#ffffff", sig_text, sig_color),  # [수정] 박스 안의 글자를 더 밝은 흰색으로 변경
+                                "#ffffff", sig_text, sig_color),  
                     unsafe_allow_html=True)
     with c4:
         oi_total = call_oi + put_oi
@@ -627,7 +626,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
     fig.add_trace(go.Bar(x=puts_c['strike'],  y=-puts_c['volume'],
                          name='Puts',  marker_color='#ff4d6d'))
     if current_price > 0:
-        fig.add_vline(x=current_price, line_dash="dash", line_color="gray", # [수정] 라이트모드 감안하여 gray로 변경
+        fig.add_vline(x=current_price, line_dash="dash", line_color="gray", 
                       annotation_text=f"현재가 ${current_price:.2f}",
                       annotation_position="top left")
     if max_pain:
@@ -677,7 +676,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
                     name='Put IV',  line=dict(color='#ff4d6d', width=2),
                     hovertemplate='$%{x}<br>IV %{y:.1f}%<extra></extra>'
                 ))
-            fig_iv.add_vline(x=current_price, line_dash="dash", line_color="gray") # [수정] 라이트모드 호환
+            fig_iv.add_vline(x=current_price, line_dash="dash", line_color="gray") 
             if max_pain:
                 fig_iv.add_vline(x=max_pain, line_dash="dot", line_color="#a855f7")
 
@@ -731,7 +730,6 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
     bull_ratio     = 0.0
     bb_signal      = "집계 불가"
 
-    # [수정1] all_flow.empty 상태일 때도 NameError 방지하도록 선행 초기화 추가
     call_buy_p  = 0.0
     call_sell_p = 0.0
     put_buy_p   = 0.0
@@ -875,6 +873,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
         )
     mp_line = f"${max_pain:,.0f}" if max_pain else f"미산출 ({mp_reason})"
 
+    # ★ 프롬프트 수정 부분 (단일 만기일)
     prompt = f"""
 당신은 월스트리트 파생상품 애널리스트입니다. 아래 데이터를 분석하세요.
 
@@ -882,7 +881,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
 - 티커: {name} ({ticker_input}) | 만기: {selected_expiry} | 잔존: {dte}일
 - 현재가: ${current_price:,.2f}
 {f'- ⚠️ 근만기({dte}DTE) 옵션: OI T+1 규정으로 당일 OI 미산출. IV도 yfinance 제한으로 일부 누락.' if is_near else ''}
-- 🔍 데이터 교차 검증 상태: {'완벽함 (무결성 통과)' if not data_warnings else '일부 지연/오염 가능성 있음 (Stale Data 경고 감지)'}
+- 🔍 데이터 교차 검증 상태: {'완벽함 (파이썬 내부 무결성 통과)' if not data_warnings else '일부 지연/오염 가능성 있음 (Stale Data 경고 감지)'}
 
 [핵심 수급 지표]
 - 콜 거래량: {int(call_vol):,}  /  풋 거래량: {int(put_vol):,}
@@ -917,6 +916,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
 - BULLISH 비중: {bull_ratio*100:.1f}% → 종합 판단: {bb_signal}
 
 [분석 지시사항]
+0. **[데이터 자체 무결성 검증 (2차 크로스체크)]** 본격적인 시황 작성에 앞서, 프롬프트에 제공된 '콜/풋 거래량과 PCR(거래량)의 수학적 비율', '실질 시장 방향성의 프리미엄 합산치'가 논리적으로 모순이 없는지 스스로 계산하여 확인하세요. 만약 오류나 비정상적인 괴리(Hallucination 징후)가 발견되면 분석 리포트 최상단에 🚨경고문으로 명시해야 합니다.
 1. PCR(거래량)과 콜/풋 거래량 집중 행사가를 교차하여 단기 주가 방향을 예측하세요.
 2. 거래량이 집중된 콜 행사가를 저항선, 풋 행사가를 지지선으로 구체적인 가격($)을 제시하세요.
 3. Max Pain이 산출된 경우 현재가({f'${current_price:,.2f}'})와의 괴리 방향을 해석하세요.
@@ -1019,6 +1019,7 @@ elif analysis_mode == "전체 기간 통합 분석 (단/중/장기)" and expirat
             f"  PCR(거래량): {r['PCR (Volume)']:.2f}  |  PCR(OI/전일기준): {r['PCR (OI)']:.2f}"
         )
 
+    # ★ 프롬프트 수정 부분 (통합 기간)
     prompt = f"""
 당신은 월스트리트 시니어 파생상품 애널리스트입니다.
 
@@ -1031,6 +1032,7 @@ elif analysis_mode == "전체 기간 통합 분석 (단/중/장기)" and expirat
 ※ OI는 전일 기준 → PCR(거래량) 위주로 분석하세요.
 
 [분석 지시사항]
+0. **[데이터 자체 무결성 검증 (2차 크로스체크)]** 본격적인 분석에 앞서, 각 기간별(Short/Mid/Long) 콜/풋 거래량과 제시된 PCR(거래량) 수치가 수학적으로 정확히 일치하는지, 혹은 비정상적인 데이터 오염이 없는지 스스로 계산하여 점검하세요. 수치상 논리적 모순이 발견된다면 리포트 최상단에 🚨경고문을 먼저 작성해야 합니다.
 1. 단기/중기/장기 PCR(거래량) 변화로 시장 심리의 Term Structure를 분석하세요.
 2. 기간 간 다이버전스(단기 Bearish + 장기 Bullish 등)의 함의를 해석하세요.
 3. 향후 1~3개월 주가 방향성 시나리오를 도출하세요.
