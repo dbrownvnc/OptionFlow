@@ -18,14 +18,15 @@ st.markdown("""
     .big-font  { font-size:40px !important; font-weight:bold; color:#00e5a0;
                  text-shadow:0 0 20px rgba(0,229,160,.2); }
     .subtitle  { font-size:16px; color:#a0a0a0; margin-bottom:25px; font-family:monospace; }
+    /* 테마 변경시에도 잘 보이도록 배경과 글자색 대비 강화 */
     .report-box{ background:#1e293b; padding:25px; border-radius:12px;
-                 border-left:5px solid #00e5a0; color:#f3f4f6; line-height:1.6; }
+                 border-left:5px solid #00e5a0; color:#ffffff; line-height:1.6; font-size:15px; }
     .warn-box  { background:#2d1a00; padding:10px 15px; border-radius:8px;
-                 border-left:4px solid #f5a623; color:#fbbf24; font-size:13px; margin-bottom:8px; }
+                 border-left:4px solid #f5a623; color:#ffd166; font-size:13px; margin-bottom:8px; }
     .info-box  { background:#0f2235; padding:10px 15px; border-radius:8px;
                  border-left:4px solid #3b82f6; color:#93c5fd; font-size:13px; margin-bottom:8px; }
     .dte-box   { background:#1a0a2d; padding:10px 15px; border-radius:8px;
-                 border-left:4px solid #a855f7; color:#d8b4fe; font-size:13px; margin-bottom:8px; }
+                 border-left:4px solid #a855f7; color:#e9d5ff; font-size:13px; margin-bottom:8px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -309,22 +310,17 @@ def strikes_to_text(lst):
 
 # ── 데이터 정합성 검증 유틸리티 ────────────────────────────────────────────────
 def validate_option_data_integrity(calls, puts, current_price):
-    """
-    옵션 데이터의 정합성을 검증하여 경고 메시지 리스트를 반환합니다.
-    """
+    """옵션 데이터의 정합성을 검증하여 경고 메시지 리스트를 반환합니다."""
     warnings = []
     
-    # 1. 원본 데이터 누락 검증
     if calls.empty or puts.empty:
         warnings.append("콜 또는 풋 옵션 데이터가 비어있습니다.")
         return warnings
 
-    # 2. 거래량 총합 논리 검증 (데이터 로드 오류 방지)
     total_vol = calls['volume'].sum() + puts['volume'].sum()
     if total_vol <= 0:
         warnings.append("옵션 체인의 전체 거래량이 0입니다. 장 시작 전이거나 yfinance 서버 지연일 수 있습니다.")
 
-    # 3. 체결가(Last Price)와 호가(Bid/Ask) 괴리 검증 (Stale Data 감지)
     def check_stale_quotes(df, opt_type):
         active_opts = df[df['volume'] >= 100].copy()
         if not active_opts.empty:
@@ -339,7 +335,6 @@ def validate_option_data_integrity(calls, puts, current_price):
     check_stale_quotes(calls, "콜")
     check_stale_quotes(puts, "풋")
 
-    # 4. 등가격(ATM) 부근 데이터 존재 여부 검증
     if current_price > 0:
         atm_calls = calls[(calls['strike'] >= current_price * 0.95) & (calls['strike'] <= current_price * 1.05)]
         if atm_calls.empty or atm_calls['volume'].sum() == 0:
@@ -458,12 +453,12 @@ if ticker_input and expirations:
         ext_delta = abs(ext_change_pct * 100) if abs(ext_change_pct) < 1 else abs(ext_change_pct)
         ext_pct_str = f"{ext_delta:.2f}%"
 
+        # [수정] 강제 흰색 지정(color:#f3f4f6) 제거하여 라이트모드/다크모드 호환성 개선
         st.markdown(
             f"<div style='display:flex;align-items:baseline;gap:16px;margin-bottom:8px;'>"
-            f"<span style='font-size:20px;font-weight:700;color:#f3f4f6;'>"
-            f"📊 {name} ({ticker_input})</span>"
+            f"<span style='font-size:20px;font-weight:700;'>📊 {name} ({ticker_input})</span>"
             f"<span style='font-size:15px;color:#9ca3af;'>정규장 종가</span>"
-            f"<span style='font-size:22px;font-weight:800;color:#f3f4f6;'>${current_price:,.2f}</span>"
+            f"<span style='font-size:22px;font-weight:800;'>${current_price:,.2f}</span>"
             f"<span style='font-size:13px;background:#1f2937;padding:3px 10px;"
             f"border-radius:12px;color:#a855f7;font-weight:700;'>{ext_label}</span>"
             f"<span style='font-size:22px;font-weight:800;color:{ext_color};'>${ext_price:,.2f}</span>"
@@ -549,7 +544,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
                     unsafe_allow_html=True)
     with c3:
         st.markdown(metric_card("PCR (거래량)", f"{pcr_vol:.2f}",
-                                "#f3f4f6", sig_text, sig_color),
+                                "#ffffff", sig_text, sig_color),  # [수정] 박스 안의 글자를 더 밝은 흰색으로 변경
                     unsafe_allow_html=True)
     with c4:
         oi_total = call_oi + put_oi
@@ -632,7 +627,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
     fig.add_trace(go.Bar(x=puts_c['strike'],  y=-puts_c['volume'],
                          name='Puts',  marker_color='#ff4d6d'))
     if current_price > 0:
-        fig.add_vline(x=current_price, line_dash="dash", line_color="white",
+        fig.add_vline(x=current_price, line_dash="dash", line_color="gray", # [수정] 라이트모드 감안하여 gray로 변경
                       annotation_text=f"현재가 ${current_price:.2f}",
                       annotation_position="top left")
     if max_pain:
@@ -682,7 +677,7 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
                     name='Put IV',  line=dict(color='#ff4d6d', width=2),
                     hovertemplate='$%{x}<br>IV %{y:.1f}%<extra></extra>'
                 ))
-            fig_iv.add_vline(x=current_price, line_dash="dash", line_color="white")
+            fig_iv.add_vline(x=current_price, line_dash="dash", line_color="gray") # [수정] 라이트모드 호환
             if max_pain:
                 fig_iv.add_vline(x=max_pain, line_dash="dot", line_color="#a855f7")
 
@@ -735,6 +730,12 @@ if analysis_mode == "단일 만기일 분석" and selected_expiry and expiration
     bearish_p      = 0.0
     bull_ratio     = 0.0
     bb_signal      = "집계 불가"
+
+    # [수정1] all_flow.empty 상태일 때도 NameError 방지하도록 선행 초기화 추가
+    call_buy_p  = 0.0
+    call_sell_p = 0.0
+    put_buy_p   = 0.0
+    put_sell_p  = 0.0
 
     if not all_flow.empty:
         all_flow = all_flow.sort_values('프리미엄($)', ascending=False).reset_index(drop=True)
