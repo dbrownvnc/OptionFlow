@@ -96,20 +96,26 @@ def get_spread_quality(bid, ask):
         return 'BID_ZERO'
     return 'WIDE'
 
-# ── 방향성 추론 ───────────────────────────────────────────────────────────────
+# ── 방향성 추론 (수정: 지연 체결가 필터링 강화) ─────────────────────────────
 def infer_direction(row):
     try:
         bid  = safe_float(row.get('bid',  0))
         ask  = safe_float(row.get('ask',  0))
         last = safe_float(row.get('lastPrice', 0))
 
-        if ask <= 0 or last <= 0:
+        if ask <= 0:
             return 'ILLIQUID', '⚫'
 
-        if bid > 0:
+        # ★ Stale Data 방어 로직: 체결가가 호가를 완전히 벗어나면 과거 데이터로 간주
+        if bid > 0 and ask > 0:
             mid = (bid + ask) / 2
-            if mid > 0 and (ask - bid) / mid > 0.50:
+            # 스프레드가 너무 넓거나, 체결가가 호가 상/하단을 20% 이상 벗어나면 무시
+            if (ask - bid) / mid > 0.50:
                 return 'ILLIQUID', '⚫'
+            if last < bid * 0.8 or last > ask * 1.2:
+                return 'STALE_IGNORE', '⚪' # 과거 지연 데이터 무시
+
+            # 정상 범위 내 체결가일 경우 방향 추론
             if last >= ask * 0.97:
                 return 'BUY',     '🟢'
             elif last <= bid * 1.03:
@@ -117,7 +123,10 @@ def infer_direction(row):
             else:
                 return 'NEUTRAL', '🟡'
         else:
-            if last >= ask * 0.90:
+            # bid=0 인 근만기/OTM 상황 (완화 모드)
+            if last > ask * 1.5:  # 체결가가 현재 Ask보다 턱없이 높으면 과거 데이터
+                return 'STALE_IGNORE', '⚪'
+            elif last >= ask * 0.90:
                 return 'BUY',     '🟢'
             elif last <= ask * 0.30:
                 return 'SELL',    '🔴'
@@ -126,7 +135,7 @@ def infer_direction(row):
     except Exception:
         return 'ILLIQUID', '⚫'
 
-# ── 프리미 계산 ─────────────────────────────────────────────────────────────
+# ── 프리미엄 계산 (수정: 왜곡된 과거 체결가 사용 금지) ───────────────────────
 def calc_mid_premium(row):
     try:
         bid  = safe_float(row.get('bid',  0))
@@ -136,13 +145,13 @@ def calc_mid_premium(row):
 
         if vol <= 0:
             return 0, 'NO_VOL'
+            
         if bid > 0 and ask > 0:
             return round((bid + ask) / 2 * vol * 100), 'MID'
         elif bid == 0 and ask > 0:
             return round(ask * vol * 100), 'ASK_ONLY'
-        elif last > 0:
-            return round(last * vol * 100), 'STALE'
-        return 0, 'NO_DATA'
+        # [수정] yfinance의 lastPrice는 신뢰할 수 없으므로 호가가 없으면 프리미엄 계산 포기
+        return 0, 'STALE_NO_DATA' 
     except Exception:
         return 0, 'ERROR'
 
@@ -188,7 +197,8 @@ def build_flow_df(df, option_type, is_near_expiry=False):
                 continue
 
             direction, emoji = infer_direction(row)
-            if direction == 'ILLIQUID':
+            # [수정] 오염된 지연 데이터(STALE_IGNORE)는 집계에서 제외
+            if direction in ['ILLIQUID', 'STALE_IGNORE']:
                 continue
 
             iv_raw = safe_float(row.get('impliedVolatility', 0))
@@ -308,7 +318,7 @@ def strikes_to_text(lst):
         for r in lst
     )
 
-# ── 데이터 정합성 검증 유틸리티 ────────────────────────────────────────────────
+# ── 데이터 정합성 검증 유틸리티 (수정: 경고 임계치 상향) ─────────────────────
 def validate_option_data_integrity(calls, puts, current_price):
     """옵션 데이터의 정합성을 검증하여 경고 메시지 리스트를 반환합니다."""
     warnings = []
@@ -329,8 +339,9 @@ def validate_option_data_integrity(calls, puts, current_price):
                 ((active_opts['bid'] == 0) & (active_opts['lastPrice'] > active_opts['ask'] * 1.5))
             )
             stale_count = stale_condition.sum()
-            if stale_count / len(active_opts) > 0.2:
-                warnings.append(f"{opt_type} 옵션의 {stale_count}개 활성 행사가에서 체결가와 호가의 심각한 괴리가 발견되었습니다. (지연 데이터 의심)")
+            # [수정] 무료 API 특성을 감안하여 경고 민감도를 20% -> 30% 초과 시에만 발생하도록 완화
+            if stale_count / len(active_opts) > 0.3:
+                warnings.append(f"{opt_type} 옵션의 {stale_count}개 활성 행사가에서 체결가(과거)와 호가(현재)의 심각한 괴리가 발견되어 해당 플로우를 분석에서 제외했습니다.")
 
     check_stale_quotes(calls, "콜")
     check_stale_quotes(puts, "풋")
